@@ -6,40 +6,44 @@ import { supabase } from './supabase';
  * @param {Object} params
  * @param {string|null} [params.conversationId] - Existing conversation ID or null to create one
  * @param {string} params.message - User's message text
- * @param {File|null} [params.file] - Optional uploaded file
+ * @param {File|null} [params.file] - Optional single uploaded file (legacy)
+ * @param {File[]} [params.files] - Optional list of uploaded files
  * @returns {Promise<{ conversation_id: string, messages: Array, attachments: Array }>}
  */
-export async function sendAdvisorMessage({ conversationId = null, message = '', file = null }) {
-  let bodyPayload = {};
+export async function sendAdvisorMessage({ conversationId = null, message = '', file = null, files = [] }) {
+  let bodyPayload = {
+    conversation_id: conversationId,
+    message,
+  };
 
-  if (file) {
-    // Read file as base64
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result;
-        // strip data:*/*;base64, prefix
-        const base64Data = result.includes(',') ? result.split(',')[1] : result;
-        resolve(base64Data);
-      };
-      reader.onerror = (err) => reject(err);
-      reader.readAsDataURL(file);
-    });
+  const fileList = Array.isArray(files) && files.length > 0 ? files : (file ? [file] : []);
 
-    bodyPayload = {
-      conversation_id: conversationId,
-      message,
-      attachment: {
-        filename: file.name,
-        base64,
-        mime_type: file.type,
-      },
-    };
-  } else {
-    bodyPayload = {
-      conversation_id: conversationId,
-      message,
-    };
+  if (fileList.length > 0) {
+    const encodedAttachments = await Promise.all(
+      fileList.map(async (f) => {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            const base64Data = result.includes(',') ? result.split(',')[1] : result;
+            resolve(base64Data);
+          };
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(f);
+        });
+        return {
+          filename: f.name,
+          base64,
+          mime_type: f.type || 'application/octet-stream',
+        };
+      })
+    );
+
+    bodyPayload.attachments = encodedAttachments;
+    // Also include single attachment for legacy Edge Function compatibility
+    if (encodedAttachments.length === 1) {
+      bodyPayload.attachment = encodedAttachments[0];
+    }
   }
 
   const { data, error } = await supabase.functions.invoke('policy-advisor-chat', {
@@ -119,21 +123,40 @@ export async function fetchConversationMessages(conversationId) {
       content = content.replace(/<!--RECOMMENDED_POLICIES:.*?-->/, '').trim();
     }
 
-    // 2. Check embedded ATTACHMENT
+    // 2. Check embedded ATTACHMENTS (multiple) or ATTACHMENT (single)
+    let attachmentsList = [];
+    const multiAttMatch = content.match(/<!--ATTACHMENTS:(.*?)-->/);
+    if (multiAttMatch) {
+      try {
+        attachmentsList = JSON.parse(multiAttMatch[1]);
+      } catch {
+        // ignore
+      }
+      content = content.replace(/<!--ATTACHMENTS:.*?-->/, '').trim();
+    }
+
     const attMatch = content.match(/<!--ATTACHMENT:(.*?)-->/);
     if (attMatch) {
       try {
         const parsed = JSON.parse(attMatch[1]);
         attachmentName = parsed.filename || '';
         attachmentPath = parsed.file_path || '';
+        if (attachmentsList.length === 0) {
+          attachmentsList.push(parsed);
+        }
       } catch {
         // ignore
       }
       content = content.replace(/<!--ATTACHMENT:.*?-->/, '').trim();
     }
 
+    if (attachmentsList.length > 0 && !attachmentName) {
+      attachmentName = attachmentsList[0]?.filename || '';
+      attachmentPath = attachmentsList[0]?.file_path || '';
+    }
+
     // 3. Fallback for legacy messages: match closest chat_attachment for user messages
-    if (!attachmentName && msg.role === 'user' && attachmentsPool.length > 0) {
+    if (!attachmentName && attachmentsList.length === 0 && msg.role === 'user' && attachmentsPool.length > 0) {
       const msgTime = new Date(msg.created_at).getTime();
       const matchIdx = attachmentsPool.findIndex((att) => {
         const attTime = new Date(att.uploaded_at).getTime();
@@ -144,6 +167,7 @@ export async function fetchConversationMessages(conversationId) {
         const matched = attachmentsPool.splice(matchIdx, 1)[0];
         attachmentName = matched.filename;
         attachmentPath = matched.file_path;
+        attachmentsList.push({ filename: matched.filename, file_path: matched.file_path });
       }
     }
 
@@ -152,6 +176,7 @@ export async function fetchConversationMessages(conversationId) {
       content,
       attachmentName: attachmentName || undefined,
       attachmentPath: attachmentPath || undefined,
+      attachments: attachmentsList.length > 0 ? attachmentsList : undefined,
       recommended_policy_ids,
     };
   });

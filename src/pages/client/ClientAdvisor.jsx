@@ -469,8 +469,12 @@ export default function ClientAdvisor() {
   const [error, setError] = useState('');
 
   // Input & attachments
+  const MAX_DOCS_LIMIT = 5;
+  const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB per file limit to protect AI performance
+  const MAX_TOTAL_SIZE_BYTES = 12 * 1024 * 1024; // 12MB combined limit
+
   const [inputMessage, setInputMessage] = useState('');
-  const [attachedFile, setAttachedFile] = useState(null);
+  const [attachedFiles, setAttachedFiles] = useState([]);
   const [policiesMap, setPoliciesMap] = useState({});
 
   const messagesEndRef = useRef(null);
@@ -592,63 +596,100 @@ export default function ClientAdvisor() {
     setActiveConversationId(null);
     setMessages([]);
     setError('');
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setInputMessage('');
     if (inputRef.current) inputRef.current.focus();
   }
 
-  function handleFileSelected(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  function handleFilesSelected(e) {
+    const selected = Array.from(e.target.files || []);
+    if (selected.length === 0) return;
 
-    // Check size limit: 20MB
-    if (file.size > 20 * 1024 * 1024) {
-      alert('File size exceeds 20MB limit. Please choose a smaller file.');
+    setError('');
+
+    // Check count limit
+    if (attachedFiles.length + selected.length > MAX_DOCS_LIMIT) {
+      setError(`You can upload a maximum of ${MAX_DOCS_LIMIT} documents at once.`);
+      e.target.value = '';
       return;
     }
 
-    setAttachedFile(file);
+    // Check 5MB per-file limit
+    for (const f of selected) {
+      if (f.size > MAX_FILE_SIZE_BYTES) {
+        setError(`"${f.name}" exceeds the 5MB size limit (${formatFileSize(f.size)}). Please upload documents under 5MB each.`);
+        e.target.value = '';
+        return;
+      }
+    }
+
+    // Check total combined size limit (12MB)
+    const currentTotal = attachedFiles.reduce((sum, f) => sum + f.size, 0);
+    const newTotal = selected.reduce((sum, f) => sum + f.size, 0);
+    if (currentTotal + newTotal > MAX_TOTAL_SIZE_BYTES) {
+      setError(`Total upload size exceeds 12MB limit (${formatFileSize(currentTotal + newTotal)}). Please compress or remove some files.`);
+      e.target.value = '';
+      return;
+    }
+
+    // Append unique files
+    setAttachedFiles((prev) => {
+      const existingKeys = new Set(prev.map((f) => `${f.name}_${f.size}`));
+      const uniqueNew = selected.filter((f) => !existingKeys.has(`${f.name}_${f.size}`));
+      return [...prev, ...uniqueNew];
+    });
+
     e.target.value = '';
   }
 
-  function handleRemoveAttachedFile() {
-    setAttachedFile(null);
+  function handleRemoveAttachedFile(indexToRemove) {
+    setAttachedFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   }
 
   async function handleSendMessage(e, overrideText = null) {
     if (e) e.preventDefault();
     const textToSend = (overrideText !== null ? overrideText : inputMessage).trim();
-    if (!textToSend && !attachedFile) return;
+    if (!textToSend && attachedFiles.length === 0) return;
     if (sending) return;
 
     setError('');
-    const userDisplayContent = textToSend || `[Attached document: ${attachedFile?.name}]`;
+    const currentFiles = overrideText === null ? [...attachedFiles] : [];
+    if (overrideText === null) {
+      setAttachedFiles([]);
+    }
+
+    const userDisplayContent = textToSend || (
+      currentFiles.length === 1
+        ? `[Attached document: ${currentFiles[0].name}]`
+        : `[Attached ${currentFiles.length} documents: ${currentFiles.map((f) => f.name).join(', ')}]`
+    );
 
     // Optimistically show user message only for newly typed queries
     let tempUserMsg = null;
     if (overrideText === null) {
+      const displayAttachments = currentFiles.map((f) => ({
+        filename: f.name,
+        size: f.size,
+      }));
       tempUserMsg = {
         id: `temp-${Date.now()}`,
         role: 'user',
         content: userDisplayContent,
         created_at: new Date().toISOString(),
         isOptimistic: true,
-        attachmentName: attachedFile?.name,
+        attachments: displayAttachments,
+        attachmentName: displayAttachments.length === 1 ? displayAttachments[0].filename : undefined,
       };
       setMessages((prev) => [...prev, tempUserMsg]);
       setInputMessage('');
     }
 
-    const currentFile = overrideText === null ? attachedFile : null;
-    if (overrideText === null) {
-      setAttachedFile(null);
-    }
-
     // Conditionally set loading indicator text
-    const isDocAnalysis = isRecommendationQuery(textToSend, !!currentFile);
+    const hasFiles = currentFiles.length > 0;
+    const isDocAnalysis = isRecommendationQuery(textToSend, hasFiles);
     setLoadingStatusText(
-      currentFile
-        ? 'Reviewing uploaded document...'
+      hasFiles
+        ? (currentFiles.length > 1 ? `Reviewing ${currentFiles.length} uploaded documents...` : 'Reviewing uploaded document...')
         : (isDocAnalysis ? 'Finding matching policies...' : 'Thinking...')
     );
 
@@ -658,7 +699,7 @@ export default function ClientAdvisor() {
       const result = await sendAdvisorMessage({
         conversationId: activeConversationId,
         message: textToSend,
-        file: currentFile,
+        files: currentFiles,
       });
 
       if (result) {
@@ -681,7 +722,7 @@ export default function ClientAdvisor() {
       if (tempUserMsg) {
         setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
         setInputMessage(textToSend);
-        setAttachedFile(currentFile);
+        setAttachedFiles(currentFiles);
       }
     } finally {
       setSending(false);
@@ -886,14 +927,26 @@ export default function ClientAdvisor() {
                       <div className={`advisor-bubble ${isUser ? 'user-bubble' : 'assistant-bubble'}`}>
                         {isUser ? (
                           <div className="advisor-user-text">
-                            {msg.attachmentName && (
+                            {msg.attachments && msg.attachments.length > 0 ? (
+                              <div className="advisor-msg-attachments-wrap">
+                                {msg.attachments.map((att, attIdx) => (
+                                  <div key={attIdx} className="advisor-msg-attachment-chip">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                    </svg>
+                                    <span className="advisor-att-chip-name">{att.filename}</span>
+                                    {att.size ? <span className="advisor-att-chip-size">({formatFileSize(att.size)})</span> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : msg.attachmentName ? (
                               <div className="advisor-msg-attachment-chip">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                                 </svg>
                                 <span>{msg.attachmentName}</span>
                               </div>
-                            )}
+                            ) : null}
                             <div className="advisor-user-content">{msg.content}</div>
                           </div>
                         ) : (
@@ -978,27 +1031,52 @@ export default function ClientAdvisor() {
 
           {/* ── Input Box & Disclaimer ── */}
           <div className="advisor-input-panel">
-            {/* Attachment preview if file is selected */}
-            {attachedFile && (
-              <div className="advisor-staged-attachment">
-                <div className="advisor-attachment-info">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                  <span className="advisor-attachment-name">{attachedFile.name}</span>
-                  <span className="advisor-attachment-size">({formatFileSize(attachedFile.size)})</span>
+            {/* Attachment preview if files are selected */}
+            {attachedFiles.length > 0 && (
+              <div className="advisor-staged-attachments-container">
+                <div className="advisor-staged-header">
+                  <span className="advisor-staged-count">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                    <span>
+                      {attachedFiles.length} of {MAX_DOCS_LIMIT} documents attached (
+                      {formatFileSize(attachedFiles.reduce((sum, f) => sum + f.size, 0))} / 12MB limit)
+                    </span>
+                  </span>
+                  {attachedFiles.length < MAX_DOCS_LIMIT && (
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="advisor-add-more-btn"
+                    >
+                      + Add more
+                    </button>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleRemoveAttachedFile}
-                  className="advisor-remove-file-btn"
-                  title="Remove attached file"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
+                <div className="advisor-staged-chips-list">
+                  {attachedFiles.map((file, idx) => (
+                    <div key={`${file.name}_${idx}`} className="advisor-staged-chip">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <span className="advisor-staged-chip-name" title={file.name}>{file.name}</span>
+                      <span className="advisor-staged-chip-size">({formatFileSize(file.size)})</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachedFile(idx)}
+                        className="advisor-staged-chip-remove"
+                        title="Remove document"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1007,20 +1085,24 @@ export default function ClientAdvisor() {
               <input
                 type="file"
                 ref={fileInputRef}
-                onChange={handleFileSelected}
+                onChange={handleFilesSelected}
                 style={{ display: 'none' }}
+                multiple
                 accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
               />
 
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className={`advisor-attach-button ${attachedFile ? 'has-file' : ''}`}
-                title="Attach a personal document (PDF, Image)"
+                className={`advisor-attach-button ${attachedFiles.length > 0 ? 'has-file' : ''}`}
+                title={`Attach documents (up to ${MAX_DOCS_LIMIT} files, max 5MB each)`}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                 </svg>
+                {attachedFiles.length > 0 && (
+                  <span className="advisor-attach-badge">{attachedFiles.length}</span>
+                )}
               </button>
 
               <input
@@ -1028,14 +1110,18 @@ export default function ClientAdvisor() {
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder={attachedFile ? "Add any notes or question about this document..." : "Ask an insurance question or request policy suggestions..."}
+                placeholder={
+                  attachedFiles.length > 0
+                    ? `Add notes or questions about these ${attachedFiles.length} document${attachedFiles.length > 1 ? 's' : ''}...`
+                    : "Ask an insurance question or attach documents to verify eligibility..."
+                }
                 className="advisor-text-input"
                 disabled={sending}
               />
 
               <button
                 type="submit"
-                disabled={sending || (!inputMessage.trim() && !attachedFile)}
+                disabled={sending || (!inputMessage.trim() && attachedFiles.length === 0)}
                 className="btn btn-primary advisor-send-button"
               >
                 <span>Send</span>

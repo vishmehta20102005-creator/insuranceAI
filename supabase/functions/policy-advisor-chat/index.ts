@@ -183,11 +183,11 @@ Deno.serve(async (req: Request) => {
     // ── 2. Parse request (Supports both JSON and multipart/form-data) ──
     let conversationId: string | null = null;
     let message: string = "";
-    let attachmentData: {
+    let attachmentsList: Array<{
       filename: string;
       bytes: Uint8Array;
       mimeType: string;
-    } | null = null;
+    }> = [];
 
     const contentType = req.headers.get("content-type") || "";
 
@@ -196,32 +196,77 @@ Deno.serve(async (req: Request) => {
       conversationId = (formData.get("conversation_id") as string) || null;
       message = ((formData.get("message") as string) || "").trim();
 
-      const file = formData.get("file") as File | null;
-      if (file && file.size > 0) {
-        const arrayBuffer = await file.arrayBuffer();
-        attachmentData = {
-          filename: file.name,
-          bytes: new Uint8Array(arrayBuffer),
-          mimeType: file.type || "application/octet-stream",
-        };
+      const files = formData.getAll("files") as File[];
+      const singleFile = formData.get("file") as File | null;
+      const allFormFiles = files.length > 0 ? files : (singleFile ? [singleFile] : []);
+
+      for (const file of allFormFiles) {
+        if (file && file.size > 0) {
+          const arrayBuffer = await file.arrayBuffer();
+          attachmentsList.push({
+            filename: file.name,
+            bytes: new Uint8Array(arrayBuffer),
+            mimeType: file.type || "application/octet-stream",
+          });
+        }
       }
     } else {
       const body = await req.json();
       conversationId = body.conversation_id || null;
       message = (body.message || "").trim();
 
-      if (body.attachment && body.attachment.base64 && body.attachment.filename) {
-        attachmentData = {
+      if (Array.isArray(body.attachments)) {
+        for (const att of body.attachments) {
+          if (att.base64 && att.filename) {
+            attachmentsList.push({
+              filename: att.filename,
+              bytes: base64ToUint8Array(att.base64),
+              mimeType: att.mime_type || "application/octet-stream",
+            });
+          }
+        }
+      } else if (body.attachment && body.attachment.base64 && body.attachment.filename) {
+        attachmentsList.push({
           filename: body.attachment.filename,
           bytes: base64ToUint8Array(body.attachment.base64),
           mimeType: body.attachment.mime_type || "application/octet-stream",
-        };
+        });
       }
     }
 
-    if (!message && !attachmentData) {
+    if (!message && attachmentsList.length === 0) {
       return Response.json(
-        { error: "Bad Request: message or attachment is required" },
+        { error: "Bad Request: message or document attachment is required" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    // ── Document upload limits & size caps (Strict performance protection) ──
+    const MAX_DOCS = 5;
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
+    const MAX_TOTAL_SIZE = 15 * 1024 * 1024; // 15MB total
+
+    if (attachmentsList.length > MAX_DOCS) {
+      return Response.json(
+        { error: `Maximum ${MAX_DOCS} documents can be uploaded at once. Please select fewer documents.` },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    let totalUploadBytes = 0;
+    for (const att of attachmentsList) {
+      if (att.bytes.length > MAX_FILE_SIZE) {
+        return Response.json(
+          { error: `File "${att.filename}" exceeds the 5MB size limit (${(att.bytes.length / (1024 * 1024)).toFixed(1)}MB). Please upload files under 5MB each.` },
+          { status: 400, headers: corsHeaders }
+        );
+      }
+      totalUploadBytes += att.bytes.length;
+    }
+
+    if (totalUploadBytes > MAX_TOTAL_SIZE) {
+      return Response.json(
+        { error: `Total upload size exceeds 15MB limit (${(totalUploadBytes / (1024 * 1024)).toFixed(1)}MB). Please compress your documents before uploading.` },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -257,7 +302,9 @@ Deno.serve(async (req: Request) => {
         ? message.length > 50
           ? `${message.substring(0, 47)}...`
           : message
-        : attachmentData?.filename || "New Conversation";
+        : attachmentsList.length > 0
+          ? `${attachmentsList.length} Uploaded Doc${attachmentsList.length > 1 ? 's' : ''}`
+          : "New Conversation";
 
       const { data: newConv, error: createConvErr } = await adminClient
         .from("chat_conversations")
@@ -276,25 +323,22 @@ Deno.serve(async (req: Request) => {
       conversationId = newConv.id;
     }
 
-    // ── 4. Upload Attachment if provided ──────────────────────
-    let savedAttachment: any = null;
-    if (attachmentData) {
-      const sanitizedFilename = attachmentData.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    // ── 4. Upload Attachments if provided ──────────────────────
+    const savedAttachments: any[] = [];
+    for (const att of attachmentsList) {
+      const sanitizedFilename = att.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
       const storagePath = `${conversationId}/${Date.now()}_${sanitizedFilename}`;
 
       const { error: uploadErr } = await adminClient.storage
         .from("chat-attachments")
-        .upload(storagePath, attachmentData.bytes, {
-          contentType: attachmentData.mimeType,
+        .upload(storagePath, att.bytes, {
+          contentType: att.mimeType,
           upsert: false,
         });
 
       if (uploadErr) {
-        console.error("[policy-advisor-chat] Failed to upload attachment:", uploadErr);
-        return Response.json(
-          { error: "Failed to upload attachment", details: uploadErr.message },
-          { status: 500, headers: corsHeaders }
-        );
+        console.warn("[policy-advisor-chat] Failed to upload attachment:", att.filename, uploadErr);
+        continue;
       }
 
       // Record in chat_attachments table
@@ -304,27 +348,32 @@ Deno.serve(async (req: Request) => {
           {
             conversation_id: conversationId,
             file_path: storagePath,
-            filename: attachmentData.filename,
+            filename: att.filename,
           },
         ])
         .select()
         .single();
 
       if (attachDbErr) {
-        console.error("[policy-advisor-chat] Failed to insert attachment row:", attachDbErr);
-      } else {
-        savedAttachment = attachRow;
+        console.warn("[policy-advisor-chat] Failed to insert attachment row:", attachDbErr);
+      } else if (attachRow) {
+        savedAttachments.push(attachRow);
       }
     }
 
     // ── 5. Insert User Message ─────────────────────────────────
-    const userMsgContent = message || (attachmentData ? `[Uploaded file: ${attachmentData.filename}]` : "");
-    const userStoredContent = attachmentData
-      ? `${userMsgContent}\n<!--ATTACHMENT:${JSON.stringify({
-          filename: attachmentData.filename,
-          file_path: savedAttachment?.file_path || "",
-          id: savedAttachment?.id || "",
-        })}-->`
+    const userMsgContent = message || (attachmentsList.length > 0
+      ? `[Uploaded ${attachmentsList.length} document${attachmentsList.length > 1 ? 's' : ''}: ${attachmentsList.map(a => a.filename).join(', ')}]`
+      : "");
+
+    const userStoredContent = savedAttachments.length > 0
+      ? `${userMsgContent}\n<!--ATTACHMENTS:${JSON.stringify(
+          savedAttachments.map((sa) => ({
+            filename: sa.filename,
+            file_path: sa.file_path,
+            id: sa.id,
+          }))
+        )}-->`
       : userMsgContent;
 
     const { error: userMsgErr } = await adminClient.from("chat_messages").insert([
@@ -354,7 +403,7 @@ Deno.serve(async (req: Request) => {
         "The AI advisor service is currently not configured with an API key. Please contact support.";
     } else {
       // Determine if this turn triggers the heavy policy recommendation comparison
-      const isRecommendation = isRecommendationIntent(message, !!attachmentData);
+      const isRecommendation = isRecommendationIntent(message, attachmentsList.length > 0);
 
       // Fetch entire conversation history for context memory
       const { data: convHistory } = await adminClient
@@ -368,22 +417,26 @@ Deno.serve(async (req: Request) => {
       let invalidDocType = "";
 
       // ── Fast Document Pre-Check for Attachments ──
-      if (attachmentData) {
-        console.log(`[policy-advisor-chat] Fast pre-checking uploaded file "${attachmentData.filename}"...`);
+      if (attachmentsList.length > 0) {
+        console.log(`[policy-advisor-chat] Fast pre-checking ${attachmentsList.length} uploaded file(s)...`);
         try {
-          const checkPayload = {
-            contents: [
-              {
-                parts: [
-                  {
-                    inline_data: {
-                      mime_type: attachmentData.mimeType,
-                      data: uint8ArrayToBase64(attachmentData.bytes),
-                    },
-                  },
-                  {
-                    text: `You are an intake document classifier for InsuranceAI.
-Evaluate this uploaded document ("${attachmentData.filename}") against insurance underwriting standards.
+          const preCheckParts: any[] = [];
+          for (let i = 0; i < attachmentsList.length; i++) {
+            const att = attachmentsList[i];
+            preCheckParts.push({
+              text: `=== Document ${i + 1} of ${attachmentsList.length}: "${att.filename}" ===`,
+            });
+            preCheckParts.push({
+              inline_data: {
+                mime_type: att.mimeType,
+                data: uint8ArrayToBase64(att.bytes),
+              },
+            });
+          }
+
+          preCheckParts.push({
+            text: `You are an intake document classifier for InsuranceAI.
+Evaluate these ${attachmentsList.length} uploaded document(s) against insurance underwriting standards.
 
 ACCEPTED INSURANCE APPLICATION DOCUMENTS (ONLY THESE):
 1. Government Photo ID (Passport, Driver's License, Aadhaar, Voter ID, PAN Card)
@@ -392,28 +445,25 @@ ACCEPTED INSURANCE APPLICATION DOCUMENTS (ONLY THESE):
 4. Medical / Health Diagnostic Report (< 12 months, hospital or pathology lab report)
 5. Existing Insurance Policy Document
 
-NOT ACCEPTED / INVALID / UNRELATED DOCUMENTS (MUST RETURN is_valid_insurance_doc: false):
+NOT ACCEPTED / INVALID / UNRELATED DOCUMENTS:
 - Academic records: University / College Marksheets, Semester Grade Cards, Academic Transcripts, Degrees, Diplomas, Course Completion Certificates, Student IDs, Homework (academic marksheets do NOT verify age, income, or medical eligibility for insurance underwriting)
 - Receipts & bills: Restaurant menus, food delivery receipts, grocery bills, retail invoices, utility bills
 - Personal media: Personal selfies, pet photos, vehicle photos, landscape photos, memes, wallpapers
 - Generic documents: Resumes, CVs, letters, random notes, contracts unrelated to insurance
 
-Examine the uploaded document and determine what it actually is.
-If it is a university marksheet, semester grade card, college transcript, restaurant menu, grocery bill, or other non-accepted document:
-Set "is_valid_insurance_doc": false
-Set "detected_type": concise accurate name (e.g. "university marksheet", "college grade card", "academic transcript", "restaurant food menu", "grocery receipt")
-Set "reason": 1 sentence explaining why it is not an accepted document for insurance underwriting.
+Determine if ALL uploaded documents are invalid/unaccepted for insurance verification.
+If at least one valid insurance document is present, set "all_documents_invalid": false.
 
 Return JSON ONLY:
 {
-  "is_valid_insurance_doc": boolean,
-  "detected_type": string,
+  "all_documents_invalid": boolean,
+  "detected_types": string[],
   "reason": string
 }`,
-                  },
-                ],
-              },
-            ],
+          });
+
+          const checkPayload = {
+            contents: [{ parts: preCheckParts }],
             generationConfig: {
               temperature: 0.1,
               maxOutputTokens: 256,
@@ -436,10 +486,12 @@ Return JSON ONLY:
             const rawText = checkData.candidates?.[0]?.content?.parts?.[0]?.text;
             if (rawText) {
               const parsed = JSON.parse(rawText);
-              if (parsed.is_valid_insurance_doc === false) {
+              if (parsed.all_documents_invalid === true) {
                 isInvalidDocument = true;
-                invalidDocType = parsed.detected_type || "non-insurance document";
-                console.log(`[policy-advisor-chat] Document identified as non-insurance: ${invalidDocType}`);
+                invalidDocType = (parsed.detected_types && parsed.detected_types.length > 0)
+                  ? parsed.detected_types.join(", ")
+                  : "non-insurance document";
+                console.log(`[policy-advisor-chat] All ${attachmentsList.length} documents identified as non-insurance: ${invalidDocType}`);
               }
             }
           }
@@ -449,14 +501,14 @@ Return JSON ONLY:
       }
 
       if (isInvalidDocument) {
-        console.log(`[policy-advisor-chat] Returning upfront rejection for invalid document: ${invalidDocType}`);
+        console.log(`[policy-advisor-chat] Returning upfront rejection for invalid document(s): ${invalidDocType}`);
         assistantReply = `**Eligibility Verdict:**
-Not Eligible — The submitted document is not an accepted document for insurance verification.
+Not Eligible — The submitted document${attachmentsList.length > 1 ? 's are' : ' is'} not accepted for insurance verification.
 
 **Suitability Assessment:**
-• The uploaded document appears to be a **${invalidDocType}**, which cannot be used to verify your identity, age, income, or medical status for insurance underwriting.
+• The uploaded document${attachmentsList.length > 1 ? 's appear' : ' appears'} to be **${invalidDocType}**, which cannot be used to verify your identity, age, income, or medical status for insurance underwriting.
 • Academic documents (such as university marksheets or college transcripts) do not satisfy underwriting requirements for age, income, or health verification.
-• We cannot evaluate or issue an insurance policy based on this document.
+• We cannot evaluate or issue an insurance policy based on ${attachmentsList.length > 1 ? 'these documents' : 'this document'}.
 • Please upload the required verification documents listed below.
 
 **Required Documents:**
@@ -538,17 +590,20 @@ RECOMMENDED_POLICY_IDS: []`;
           }
         }
 
-        // Attach client's uploaded document if provided in this turn
-        if (attachmentData) {
-          currentTurnParts.push({
-            text: `=== APPLICANT'S UPLOADED DOCUMENT: "${attachmentData.filename}" ===`,
-          });
-          currentTurnParts.push({
-            inline_data: {
-              mime_type: attachmentData.mimeType,
-              data: uint8ArrayToBase64(attachmentData.bytes),
-            },
-          });
+        // Attach client's uploaded documents if provided in this turn
+        if (attachmentsList.length > 0) {
+          for (let i = 0; i < attachmentsList.length; i++) {
+            const att = attachmentsList[i];
+            currentTurnParts.push({
+              text: `=== APPLICANT'S UPLOADED DOCUMENT ${i + 1} of ${attachmentsList.length}: "${att.filename}" ===`,
+            });
+            currentTurnParts.push({
+              inline_data: {
+                mime_type: att.mimeType,
+                data: uint8ArrayToBase64(att.bytes),
+              },
+            });
+          }
         }
 
         currentTurnParts.push({
@@ -908,17 +963,36 @@ CHAT_TITLE: <3 to 6 words>
         content = content.replace(/<!--RECOMMENDED_POLICIES:.*?-->/, "").trim();
       }
 
-      // 2. Check embedded ATTACHMENT
+      // 2. Check embedded ATTACHMENTS (multiple) or ATTACHMENT (single)
+      let attachmentsListForMsg: any[] = [];
+      const multiAttMatch = content.match(/<!--ATTACHMENTS:(.*?)-->/);
+      if (multiAttMatch) {
+        try {
+          attachmentsListForMsg = JSON.parse(multiAttMatch[1]);
+        } catch {
+          // ignore
+        }
+        content = content.replace(/<!--ATTACHMENTS:.*?-->/, "").trim();
+      }
+
       const attMatch = content.match(/<!--ATTACHMENT:(.*?)-->/);
       if (attMatch) {
         try {
           const parsedAtt = JSON.parse(attMatch[1]);
           attachmentName = parsedAtt.filename || "";
           attachmentPath = parsedAtt.file_path || "";
+          if (attachmentsListForMsg.length === 0) {
+            attachmentsListForMsg.push(parsedAtt);
+          }
         } catch {
           // ignore
         }
         content = content.replace(/<!--ATTACHMENT:.*?-->/, "").trim();
+      }
+
+      if (attachmentsListForMsg.length > 0 && !attachmentName) {
+        attachmentName = attachmentsListForMsg[0]?.filename || "";
+        attachmentPath = attachmentsListForMsg[0]?.file_path || "";
       }
 
       // 3. Clean up any leftover CHAT_TITLE tag
@@ -944,6 +1018,7 @@ CHAT_TITLE: <3 to 6 words>
         content,
         attachmentName: attachmentName || undefined,
         attachmentPath: attachmentPath || undefined,
+        attachments: attachmentsListForMsg.length > 0 ? attachmentsListForMsg : undefined,
         recommended_policy_ids: recIds,
       };
     });

@@ -138,6 +138,11 @@ export default function ClientPolicyDetail() {
   // ── file picker
   function handleFileChange(type, e) {
     const file = e.target.files?.[0] ?? null;
+    if (file && file.size > 5 * 1024 * 1024) {
+      alert(`"${file.name}" exceeds the 5MB size limit (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please upload a document under 5MB to ensure fast AI processing.`);
+      e.target.value = '';
+      return;
+    }
     setFiles((prev) => ({ ...prev, [type]: file }));
     // reset the input so the same file can be re-selected after clearing
     e.target.value = '';
