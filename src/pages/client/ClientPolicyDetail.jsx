@@ -403,9 +403,12 @@ export default function ClientPolicyDetail() {
                         <EligibilityResultCard
                           submission={submission}
                           result={eligibilityResult}
+                          policy={policy}
                           canResubmit={canResubmit}
                           isRetrying={isProcessingEligibility}
                           onRetryEligibility={handleRetryEligibility}
+                          onViewDoc={handleViewSubmissionDoc}
+                          viewingDocId={viewingDocId}
                           onScrollToResubmit={() => {
                             document.getElementById('upload-form-section')?.scrollIntoView({ behavior: 'smooth' });
                           }}
@@ -413,7 +416,7 @@ export default function ClientPolicyDetail() {
                       ) : null}
 
                       {/* Submitted Documents & Status Card (shown only if no AI eligibility result exists) */}
-                      {(!eligibilityResult || !['eligible', 'not_eligible', 'needs_review', 'approved', 'rejected'].includes(submission.status)) ? (
+                      {(!eligibilityResult || !['eligible', 'not_eligible', 'needs_review', 'approved', 'rejected'].includes(submission.status)) && (
                         <div className="card" style={{ marginBottom: '28px' }}>
                           <div className="card-header">
                             <div>
@@ -506,106 +509,6 @@ export default function ClientPolicyDetail() {
                                 ? 'Your application has been approved. Thank you!'
                                 : null}
                             </p>
-                          )}
-                        </div>
-                      ) : (
-                        /* Submitted Documents Card shown when EligibilityResultCard is visible */
-                        <div className="card" style={{ marginBottom: '28px' }}>
-                          <div
-                            className="card-header"
-                            style={{
-                              marginBottom: showSubmittedDocs ? '14px' : '0',
-                              cursor: 'pointer',
-                              userSelect: 'none',
-                            }}
-                            onClick={() => setShowSubmittedDocs((prev) => !prev)}
-                          >
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <h3 style={{ fontSize: '1.0625rem', fontWeight: 600, margin: 0, color: 'var(--color-text-primary)' }}>
-                                  Submitted Application Documents
-                                </h3>
-                                <span className="doc-count-pill">
-                                  {submission.submission_documents?.length || 0} documents
-                                </span>
-                              </div>
-                              <p className="card-subtitle" style={{ marginTop: '4px' }}>
-                                Uploaded on{' '}
-                                {new Date(submission.submitted_at).toLocaleDateString(undefined, {
-                                  day: 'numeric', month: 'long', year: 'numeric',
-                                })}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              style={{ gap: '6px' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowSubmittedDocs((prev) => !prev);
-                              }}
-                            >
-                              <span>{showSubmittedDocs ? 'Hide Documents' : 'View Documents'}</span>
-                              <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                style={{
-                                  transform: showSubmittedDocs ? 'rotate(180deg)' : 'rotate(0deg)',
-                                  transition: 'transform 0.15s ease',
-                                }}
-                              >
-                                <polyline points="6 9 12 15 18 9" />
-                              </svg>
-                            </button>
-                          </div>
-
-                          {showSubmittedDocs && submission.submission_documents?.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
-                              {submission.submission_documents.map((doc) => {
-                                const meta = REQUIRED_DOC_TYPES.find((d) => d.type === doc.document_type);
-                                return (
-                                  <div key={doc.id} className="doc-row-existing">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
-                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                                        stroke="var(--color-accent)" strokeWidth="1.75" style={{ flexShrink: 0 }}>
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                      </svg>
-                                      <div style={{ minWidth: 0 }}>
-                                        <div className="doc-row-name" title={doc.filename}>{doc.filename}</div>
-                                        <div className="doc-row-size">{formatFileSize(doc.file_size)}</div>
-                                      </div>
-                                    </div>
-                                    <span className="doc-row-type">{meta?.label ?? doc.document_type}</span>
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-sm"
-                                      style={{ flexShrink: 0 }}
-                                      onClick={() => handleViewSubmissionDoc(doc)}
-                                      disabled={viewingDocId === doc.id}
-                                      title="Open in browser"
-                                    >
-                                      {viewingDocId === doc.id ? (
-                                        <><span className="btn-spinner-dark" /> Opening…</>
-                                      ) : (
-                                        <>
-                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                            <polyline points="15 3 21 3 21 9" />
-                                            <line x1="10" y1="14" x2="21" y2="3" />
-                                          </svg>
-                                          View
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
                           )}
                         </div>
                       )}
