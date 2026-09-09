@@ -416,6 +416,7 @@ export default function ClientAdvisor() {
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
   const [loadingStatusText, setLoadingStatusText] = useState('Thinking...');
   const [error, setError] = useState('');
 
@@ -427,6 +428,54 @@ export default function ClientAdvisor() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Prevent accidental page refresh/close while AI is actively generating response
+  useEffect(() => {
+    if (!sending) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [sending]);
+
+  // Auto-recovery: If user refreshed while AI was generating, poll for completed response
+  useEffect(() => {
+    if (loadingMessages || sending || !activeConversationId || messages.length === 0) return;
+
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === 'user' && !lastMsg.isOptimistic) {
+      setIsRecovering(true);
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts++;
+        try {
+          const freshMsgs = await fetchConversationMessages(activeConversationId);
+          if (freshMsgs.length > 0) {
+            const latest = freshMsgs[freshMsgs.length - 1];
+            if (latest.role === 'assistant') {
+              setMessages(freshMsgs);
+              setIsRecovering(false);
+              clearInterval(interval);
+              return;
+            }
+          }
+        } catch (e) {
+          console.error('Polling for completed assistant response:', e);
+        }
+
+        if (attempts >= 5) {
+          setIsRecovering(false);
+          clearInterval(interval);
+        }
+      }, 2500);
+
+      return () => clearInterval(interval);
+    } else {
+      setIsRecovering(false);
+    }
+  }, [messages, activeConversationId, loadingMessages, sending]);
 
   // 1. Initial load: fetch conversations and published policies
   useEffect(() => {
@@ -447,7 +496,7 @@ export default function ClientAdvisor() {
   // 3. Scroll to bottom on new message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+  }, [messages, sending, isRecovering]);
 
   async function loadInitialData() {
     setLoadingConversations(true);
@@ -518,29 +567,34 @@ export default function ClientAdvisor() {
     setAttachedFile(null);
   }
 
-  async function handleSendMessage(e) {
+  async function handleSendMessage(e, overrideText = null) {
     if (e) e.preventDefault();
-    const textToSend = inputMessage.trim();
+    const textToSend = (overrideText !== null ? overrideText : inputMessage).trim();
     if (!textToSend && !attachedFile) return;
     if (sending) return;
 
     setError('');
     const userDisplayContent = textToSend || `[Attached document: ${attachedFile?.name}]`;
 
-    // Optimistically show user message
-    const tempUserMsg = {
-      id: `temp-${Date.now()}`,
-      role: 'user',
-      content: userDisplayContent,
-      created_at: new Date().toISOString(),
-      isOptimistic: true,
-      attachmentName: attachedFile?.name,
-    };
+    // Optimistically show user message only for newly typed queries
+    let tempUserMsg = null;
+    if (overrideText === null) {
+      tempUserMsg = {
+        id: `temp-${Date.now()}`,
+        role: 'user',
+        content: userDisplayContent,
+        created_at: new Date().toISOString(),
+        isOptimistic: true,
+        attachmentName: attachedFile?.name,
+      };
+      setMessages((prev) => [...prev, tempUserMsg]);
+      setInputMessage('');
+    }
 
-    setMessages((prev) => [...prev, tempUserMsg]);
-    setInputMessage('');
-    const currentFile = attachedFile;
-    setAttachedFile(null);
+    const currentFile = overrideText === null ? attachedFile : null;
+    if (overrideText === null) {
+      setAttachedFile(null);
+    }
 
     // Conditionally set loading indicator text
     const isDocAnalysis = isRecommendationQuery(textToSend, !!currentFile);
@@ -576,12 +630,14 @@ export default function ClientAdvisor() {
       console.error('Send error:', err);
       setError('Failed to get a response from the Advisor. Please try again.');
       // Remove optimistic message if failed
-      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
-      // Restore input text
-      setInputMessage(textToSend);
-      setAttachedFile(currentFile);
+      if (tempUserMsg) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+        setInputMessage(textToSend);
+        setAttachedFile(currentFile);
+      }
     } finally {
       setSending(false);
+      setIsRecovering(false);
     }
   }
 
@@ -808,7 +864,7 @@ export default function ClientAdvisor() {
                   );
                 })}
 
-                {sending && (
+                {(sending || isRecovering) && (
                   <div className="advisor-message-row assistant-row">
                     <div className="advisor-avatar">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -824,8 +880,34 @@ export default function ClientAdvisor() {
                         <span />
                         <span />
                       </div>
-                      <span className="advisor-typing-text">{loadingStatusText}</span>
+                      <span className="advisor-typing-text">
+                        {isRecovering ? 'Checking for AI response...' : loadingStatusText}
+                      </span>
                     </div>
+                  </div>
+                )}
+
+                {/* Show regenerate button if response was interrupted on reload and polling ended */}
+                {!sending && !isRecovering && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
+                  <div className="advisor-interrupted-banner">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
+                      <span>Response was interrupted when the page refreshed.</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleSendMessage(null, messages[messages.length - 1].content)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                      </svg>
+                      <span>Regenerate Response</span>
+                    </button>
                   </div>
                 )}
 

@@ -400,28 +400,39 @@ Deno.serve(async (req: Request) => {
           publishedPolicies.map((p) => [p.id, p.name])
         );
 
-        // Download and attach official policy PDFs
-        for (const doc of pubPolicyDocs) {
-          try {
-            const { data: fileBlob, error: dlErr } = await adminClient.storage
-              .from("policy-documents")
-              .download(doc.file_path);
+        // Download and attach official policy PDFs concurrently
+        const downloadedDocs = await Promise.all(
+          pubPolicyDocs.map(async (doc) => {
+            try {
+              const { data: fileBlob, error: dlErr } = await adminClient.storage
+                .from("policy-documents")
+                .download(doc.file_path);
 
-            if (!dlErr && fileBlob) {
-              const b64 = await blobToBase64(fileBlob);
-              const pName = policyNameMap[doc.policy_id] || doc.policy_id;
-              currentTurnParts.push({
-                text: `[Official Policy Document for "${pName}" (Policy ID: ${doc.policy_id}): "${doc.filename}" (type: ${doc.document_type})]`,
-              });
-              currentTurnParts.push({
-                inline_data: {
-                  mime_type: fileBlob.type || "application/pdf",
-                  data: b64,
-                },
-              });
+              if (!dlErr && fileBlob) {
+                const b64 = await blobToBase64(fileBlob);
+                const pName = policyNameMap[doc.policy_id] || doc.policy_id;
+                return {
+                  label: `[Official Policy Document for "${pName}" (Policy ID: ${doc.policy_id}): "${doc.filename}" (type: ${doc.document_type})]`,
+                  mimeType: fileBlob.type || "application/pdf",
+                  base64: b64,
+                };
+              }
+            } catch (docErr) {
+              console.warn(`[policy-advisor-chat] Could not load policy doc ${doc.filename}:`, docErr);
             }
-          } catch (docErr) {
-            console.warn(`[policy-advisor-chat] Could not load policy doc ${doc.filename}:`, docErr);
+            return null;
+          })
+        );
+
+        for (const d of downloadedDocs) {
+          if (d) {
+            currentTurnParts.push({ text: d.label });
+            currentTurnParts.push({
+              inline_data: {
+                mime_type: d.mimeType,
+                data: d.base64,
+              },
+            });
           }
         }
 
