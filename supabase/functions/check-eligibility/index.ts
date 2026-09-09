@@ -283,15 +283,15 @@ export default {
         let lastStatus = 0;
         let lastErrBody = "";
         const MODELS = [
-          "gemini-2.0-flash",
           "gemini-2.5-flash",
-          "gemini-1.5-flash",
+          "gemini-2.5-flash-lite",
           "gemini-3.6-flash",
           "gemini-3.5-flash",
         ];
 
         for (const model of MODELS) {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+          const currentPayload = JSON.parse(JSON.stringify(geminiPayload));
           // Only retry on 503 (overloaded), max 2 attempts per model
           for (let attempt = 1; attempt <= 2; attempt++) {
             console.log(`[check-eligibility] Requesting ${model} (attempt ${attempt}/2)...`);
@@ -299,7 +299,7 @@ export default {
               const res = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(geminiPayload),
+                body: JSON.stringify(currentPayload),
               });
 
               if (res.ok) {
@@ -312,16 +312,16 @@ export default {
               lastErrBody = await res.text();
               console.warn(`[check-eligibility] ${model} attempt ${attempt} → HTTP ${res.status}`);
 
-              // If thinkingConfig is rejected by this model version, remove it and retry immediately
-              if (res.status === 400 && geminiPayload.generationConfig?.thinkingConfig) {
-                console.log(`[check-eligibility] Retrying without thinkingConfig...`);
-                delete geminiPayload.generationConfig.thinkingConfig;
+              // If thinkingConfig is rejected by this model version, remove it for this model only
+              if (res.status === 400 && currentPayload.generationConfig?.thinkingConfig) {
+                console.log(`[check-eligibility] Retrying ${model} without thinkingConfig...`);
+                delete currentPayload.generationConfig.thinkingConfig;
                 continue;
               }
 
               // Only retry on 503 (overloaded) or 429 (rate limit)
               if (res.status === 503 || res.status === 429) {
-                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+                await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
                 continue;
               }
 

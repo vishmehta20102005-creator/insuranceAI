@@ -605,9 +605,8 @@ CHAT_TITLE: <3 to 6 words>
       }
 
       const MODELS = [
-        "gemini-2.0-flash",
         "gemini-2.5-flash",
-        "gemini-1.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
       ];
@@ -616,13 +615,16 @@ CHAT_TITLE: <3 to 6 words>
 
       for (const model of MODELS) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+        // Clone payload for this model so thinkingConfig is not mutated for subsequent models
+        const currentPayload = JSON.parse(JSON.stringify(geminiPayload));
+
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
             console.log(`[policy-advisor-chat] Requesting ${model} (attempt ${attempt}/2)...`);
             const res = await fetch(url, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(geminiPayload),
+              body: JSON.stringify(currentPayload),
             });
 
             if (res.ok) {
@@ -637,15 +639,15 @@ CHAT_TITLE: <3 to 6 words>
             lastErrBody = await res.text();
             console.warn(`[policy-advisor-chat] ${model} attempt ${attempt} → HTTP ${res.status}`);
 
-            // If thinkingConfig is rejected by this model version, remove it and retry immediately
-            if (res.status === 400 && geminiPayload.generationConfig?.thinkingConfig) {
-              console.log(`[policy-advisor-chat] Retrying without thinkingConfig...`);
-              delete geminiPayload.generationConfig.thinkingConfig;
+            // If thinkingConfig is rejected by this model version, strip it for this model only
+            if (res.status === 400 && currentPayload.generationConfig?.thinkingConfig) {
+              console.log(`[policy-advisor-chat] Retrying ${model} without thinkingConfig...`);
+              delete currentPayload.generationConfig.thinkingConfig;
               continue;
             }
 
             if (res.status === 503 || res.status === 429) {
-              await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+              await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
               continue;
             }
             break;
