@@ -596,7 +596,7 @@ CHAT_TITLE: <3 to 6 words>
           contents: geminiContents,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 600,
+            maxOutputTokens: 4096,
             thinkingConfig: {
               thinkingBudget: 0,
             },
@@ -604,7 +604,13 @@ CHAT_TITLE: <3 to 6 words>
         };
       }
 
-      const MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"];
+      const MODELS = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+      ];
       let lastStatus = 0;
       let lastErrBody = "";
 

@@ -282,9 +282,13 @@ export default {
         let geminiData: any = null;
         let lastStatus = 0;
         let lastErrBody = "";
-        // gemini-3.6-flash = current latest flash model (confirmed on ai.google.dev/gemini-api/docs/models)
-        // gemini-3.5-flash = stable fallback if 3.6 is overloaded
-        const MODELS = ["gemini-3.6-flash", "gemini-3.5-flash"];
+        const MODELS = [
+          "gemini-2.0-flash",
+          "gemini-2.5-flash",
+          "gemini-1.5-flash",
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+        ];
 
         for (const model of MODELS) {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
