@@ -273,6 +273,9 @@ export default {
             temperature: 0.2,
             maxOutputTokens: 8192,
             responseMimeType: "application/json",
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         };
 
@@ -304,6 +307,13 @@ export default {
               lastStatus = res.status;
               lastErrBody = await res.text();
               console.warn(`[check-eligibility] ${model} attempt ${attempt} → HTTP ${res.status}`);
+
+              // If thinkingConfig is rejected by this model version, remove it and retry immediately
+              if (res.status === 400 && geminiPayload.generationConfig?.thinkingConfig) {
+                console.log(`[check-eligibility] Retrying without thinkingConfig...`);
+                delete geminiPayload.generationConfig.thinkingConfig;
+                continue;
+              }
 
               // Only retry on 503 (overloaded) or 429 (rate limit)
               if (res.status === 503 || res.status === 429) {

@@ -536,7 +536,10 @@ ${REQUIRED_DOCUMENTS_FORMATTED}
           contents: priorContents,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 4096,
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         };
       } else {
@@ -572,12 +575,12 @@ INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
 • This platform requires exactly these ${REQUIRED_DOCUMENT_TYPES.length} document types for every application:
 ${REQUIRED_DOCUMENTS_FORMATTED}
 • No address proof or other document types are collected by InsuranceAI. Never ask for or state that address proof or utility bills are needed.
-• If a user asks a broader conceptual question (e.g. "what's a co-payment", "what is a deductible") that isn't about this platform specifically, general insurance knowledge is fine — but anything about what THIS app requires or how its process works must reflect the actual implementation, not generic assumptions.
+• If a user asks a broader conceptual question (e.g. "what's a co-payment", "what is a deductible", "difference between deductible and copay") that isn't about this platform specifically, provide a complete, clear, and comprehensive explanation defining all terms asked. Never cut off your answer.
 
 RESPONSE LENGTH & FOLLOW-UP INSTRUCTIONS:
-• For follow-up questions about a decision or evaluation you already explained (e.g. "why", "why am I not suitable", "what does that mean", "can you explain"), answer conversationally, directly, and briefly — a sentence or two.
+• For follow-up questions about a previous rejection or specific eligibility decision, answer conversationally, directly, and concisely.
 • Do NOT repeat the full structured breakdown (Policy / Requirement Violated / Policy Rule Details / Applicant Details / Assessment / Next Steps / Disclaimer) unless the user explicitly asks you to re-explain the entire decision in full detail. That structured format is reserved for the initial evaluation only.
-• Answer accurately based on the facts and reasons already established in this conversation (e.g. if an age limit was violated, reiterate that direct reason simply and clearly in a sentence).
+• Answer accurately based on the facts and reasons already established in this conversation (e.g. if an age limit was violated, reiterate that direct reason simply and clearly).
 • You only discuss insurance-related topics: platform policies, general insurance concepts, and helping applicants understand coverage or previous guidance. If asked about unrelated topics, politely decline.
 • Use clean, professional text with bold labels if needed. Never output raw hashtag headers (like ### or ####) and never enclose your response in code fences (like ''' or \`\`\`).
 
@@ -593,7 +596,10 @@ CONVERSATION SIDEBAR TITLE / SHORT DESCRIPTION (MANDATORY FORMAT):
           contents: geminiContents,
           generationConfig: {
             temperature: 0.3,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 8192,
+            thinkingConfig: {
+              thinkingBudget: 0,
+            },
           },
         };
       }
@@ -624,6 +630,13 @@ CONVERSATION SIDEBAR TITLE / SHORT DESCRIPTION (MANDATORY FORMAT):
             lastStatus = res.status;
             lastErrBody = await res.text();
             console.warn(`[policy-advisor-chat] ${model} attempt ${attempt} → HTTP ${res.status}`);
+
+            // If thinkingConfig is rejected by this model version, remove it and retry immediately
+            if (res.status === 400 && geminiPayload.generationConfig?.thinkingConfig) {
+              console.log(`[policy-advisor-chat] Retrying without thinkingConfig...`);
+              delete geminiPayload.generationConfig.thinkingConfig;
+              continue;
+            }
 
             if (res.status === 503 || res.status === 429) {
               await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
