@@ -118,41 +118,28 @@ function normalizeMarkdown(text) {
  * Policy recommendation cards are rendered STRICTLY from recommendedPolicyIds.
  */
 function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolicyIds = [] }) {
-  // Collect policy IDs from explicit recommendedPolicyIds, markdown links, and name mentions
-  const detectedIds = new Set(recommendedPolicyIds || []);
+  // Check if the response states the applicant is ineligible or disqualified
+  const contentLower = (content || '').toLowerCase();
+  const isIneligible =
+    /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit/i.test(
+      contentLower
+    );
 
-  if (content && policiesMap) {
-    // 1. Check for /client/policies/<uuid> links in the content
-    const linkMatches = content.matchAll(/\/client\/policies\/([a-f0-9-]{36})/gi);
-    for (const match of linkMatches) {
-      if (policiesMap[match[1]]) {
-        detectedIds.add(match[1]);
-      }
-    }
-
-    // 2. Check for policy names mentioned in content
-    const contentLower = content.toLowerCase();
-    for (const [id, pol] of Object.entries(policiesMap)) {
-      if (pol?.name && pol.name.length > 4 && contentLower.includes(pol.name.toLowerCase())) {
-        detectedIds.add(id);
-      }
-    }
-  }
-
-  // Build policy cards
+  // Policy recommendation cards are strictly rendered ONLY when the applicant is eligible and policies are recommended
   const policyCards = [];
-  const uniqueIds = Array.from(detectedIds);
-
-  for (const policyId of uniqueIds) {
-    const policyObj = policiesMap[policyId];
-    if (policyObj) {
-      policyCards.push({
-        id: policyId,
-        title: policyObj.name,
-        category: policyObj.category || 'Insurance',
-        description: policyObj.description || '',
-        path: `/client/policies/${policyId}`,
-      });
+  if (!isIneligible && recommendedPolicyIds && recommendedPolicyIds.length > 0) {
+    const uniqueIds = Array.from(new Set(recommendedPolicyIds));
+    for (const policyId of uniqueIds) {
+      const policyObj = policiesMap[policyId];
+      if (policyObj) {
+        policyCards.push({
+          id: policyId,
+          title: policyObj.name,
+          category: policyObj.category || 'Insurance',
+          description: policyObj.description || '',
+          path: `/client/policies/${policyId}`,
+        });
+      }
     }
   }
 

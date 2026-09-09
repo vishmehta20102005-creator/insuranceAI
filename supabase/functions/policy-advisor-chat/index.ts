@@ -450,7 +450,7 @@ Deno.serve(async (req: Request) => {
         }
 
         currentTurnParts.push({
-          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nINSTRUCTIONS FOR THIS RESPONSE:\n1. STRICT HARD-CONSTRAINT CHECK: Before recommending any policy, check all hard criteria in the policy documents (especially age limits, medical exclusions, and income thresholds) against the applicant's uploaded documents and details.\n2. DO NOT recommend a policy if the applicant violates a hard rule (e.g. if the policy requires age 18-60, but the applicant's age proof shows they are outside that range). Explicitly state the disqualifying reason and policy rule instead.\n3. If eligible, recommend the policy with plain-language reasoning and copy its EXACT link from the catalog above: [Apply for <Policy Name>](/client/policies/<policy_id>).\n4. MANDATORY LINK RULE: After your preliminary guidance disclaimer, if a policy is recommended, you MUST provide the direct clickable link to apply, e.g.:\n"To get an official eligibility decision, submit an application on the [Apply for <Policy Name>](/client/policies/<policy_id>) page." NEVER end a message with "detail page:" without the markdown link!\n5. Append CHAT_TITLE: <3 to 6 words> on its own line summarizing the consultation topic for the sidebar.\n6. Append the structured list at the very end on a new line: RECOMMENDED_POLICY_IDS: [<policy_id>, ...] or RECOMMENDED_POLICY_IDS: [] if none qualify.`,
+          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Be extremely concise, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence stating if they are Eligible or Not Eligible.\n   **Suitability Assessment**: 2-3 brief bullet points explaining why they are suitable (if criteria met) or why NOT suitable (exact rule violated, e.g. "Age is 65 years, exceeding the 18–60 age limit").\n   **Required Documents**: 4 brief bullet points listing the exact documents: Government ID Proof, Recent Medical Report (< 12 mo), Income Proof (min. INR 25,000/mo net), and Age Proof.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE: If the applicant violates any hard rule or is not eligible, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy. Suggest contacting support for senior/specialized options instead.\n4. IF ELIGIBLE: Output RECOMMENDED_POLICY_IDS: [<uuid>] and provide the direct application link: [Apply for <Policy Name>](/client/policies/<policy_id>).\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
         });
 
         // Build multi-turn history excluding the current turn (since we provide currentTurnParts)
@@ -479,66 +479,35 @@ Deno.serve(async (req: Request) => {
           parts: currentTurnParts,
         });
 
-        const RECOMMENDATION_SYSTEM_PROMPT = `You are an expert insurance policy advisor for InsuranceAI.
-Your goal is to provide accurate, honest, and trustworthy guidance to applicants based on our official published policies.
+        const RECOMMENDATION_SYSTEM_PROMPT = `You are a concise, direct insurance advisor for InsuranceAI.
+Your goal is to give brief, clear, and scannable guidance based on our published policies.
 
-CRITICAL ELIGIBILITY RULES & CONSTRAINTS:
-1. STRICT HARD-CONSTRAINT VERIFICATION:
-   - Before recommending ANY policy, you MUST strictly check all hard eligibility constraints specified in the official policy documents (such as age limits e.g. 18-60 years, minimum income thresholds, pre-existing condition exclusions, waiting periods, geographic restrictions, or required documentation).
-   - Carefully inspect the applicant's uploaded documents (e.g., date of birth/age in age proofs or IDs, medical records, income proof) or stated details against these exact rules.
+CRITICAL BREVITY & STRUCTURE (STRICT):
+Keep responses short, clear, and readable (under 140 words). No essays or lengthy filler. Use exactly 3 short sections:
 
-2. DO NOT RECOMMEND INELIGIBLE POLICIES AS A FIT:
-   - If the applicant's documents or profile clearly VIOLATES a hard constraint of a policy (for example, if the policy requires age 18-60, but the applicant's age proof shows they are outside that range, or if they have an explicitly excluded condition):
-     • You must NOT recommend that policy as an eligible or suitable option.
-     • You must clearly and explicitly explain why they do not meet the eligibility requirements for that policy, citing the specific rule violated (e.g. "Policy X requires applicants to be between 18 and 60 years old, but your age proof shows you are outside this range").
-     • Warn the applicant that an application for this policy would likely be rejected due to this blocking criterion.
+1. **Eligibility Verdict**: 1 direct sentence (Eligible or Not Eligible).
+2. **Suitability Assessment**:
+   • If Eligible: 2-3 brief bullet points on why they qualify.
+   • If Ineligible: 1-2 brief bullet points on why they do NOT qualify (e.g. "Age 65 exceeds maximum limit of 60 years. No current published policies match this profile.")
+3. **Required Documents**:
+   List the 4 required application documents on InsuranceAI:
+   • Government ID Proof
+   • Recent Medical Report (< 12 months)
+   • Income Proof (min. INR 25,000/mo net)
+   • Age Proof
 
-3. IF AN APPLICANT MEETS ALL ELIGIBILITY CRITERIA:
-   - Recommend the matching policy (or policies) with plain-language reasoning citing how their profile satisfies the criteria.
-   - Mention the policy using its exact markdown link format: [Policy Name](/client/policies/<policy_id>).
+RECOMMENDATION RULES:
+- If the applicant is INELIGIBLE or NO policy matches:
+  • You MUST output RECOMMENDED_POLICY_IDS: []
+  • NEVER recommend an ineligible policy, NEVER say it is a preliminary fit, and NEVER tell them to apply for it.
+  • Suggest contacting support for custom senior citizen plans instead.
+- If the applicant IS ELIGIBLE:
+  • Output RECOMMENDED_POLICY_IDS: [<uuid>]
+  • Include the link: "To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
 
-4. IF NO POLICIES MATCH OR APPLICANT IS DISQUALIFIED ACROSS ALL POLICIES:
-   - State clearly and empathetically that based on the provided documents and criteria, none of the currently published policies appear to be a match for their profile.
-   - Detail the specific disqualifying factors (such as age limit or exclusion).
-
-5. CRITICAL DISCLAIMER:
-   - Always remind the applicant that this is a preliminary guidance assessment based on the available documents, not a binding underwriting decision.
-
-6. MANDATORY CALL TO ACTION (only when a viable policy is recommended):
-   - Conclude your recommendation with the official next step:
-     "To get an official eligibility decision, please submit an application for this policy on its detail page: [Apply for <Policy Name>](/client/policies/<policy_id>)"
-   - If no policies are recommended due to ineligibility, advise them on alternative steps or contacting an administrator instead of directing them to apply for an ineligible policy.
-
-7. STRUCTURED RECOMMENDED POLICY IDS (MANDATORY FORMAT):
-   - At the absolute end of your response, on its own line, you MUST append:
-     RECOMMENDED_POLICY_IDS: [<uuid_1>, <uuid_2>]
-   - ONLY include a policy ID in this list if the applicant actually qualifies and meets all hard criteria, and you are explicitly recommending it as a good fit.
-   - If no policies qualify, or if the applicant is ineligible/disqualified for all published policies, you MUST output:
-     RECOMMENDED_POLICY_IDS: []
-   - NEVER put a policy ID in RECOMMENDED_POLICY_IDS if you only mentioned it to explain why the applicant is NOT eligible.
-
-8. FORMATTING & PRESENTATION GUIDELINES:
-   - Use clean, well-spaced Markdown.
-   - Use bold section headers (e.g. "**Ineligibility Assessment Details**" or "**Alternative Next Steps**") instead of raw hashtags (do NOT write "###" or "####").
-   - NEVER enclose your conversational response in code block quotes or backticks (do NOT output "'''" or "\`\`\`").
-   - For lists, always use a bullet followed by a space (e.g. "• ") so items format properly.
-   - Always format policy links cleanly as [Policy Name](/client/policies/<policy_id>), using relative paths only (never full localhost or domain URLs). Do not put unclosed bold markers around links.
-
-9. INITIAL EVALUATION VS FOLLOW-UP QUESTIONS:
-   - The full structured breakdown (Policy / Requirement Violated / Policy Criterion / Applicant Details / Assessment / Alternative Steps) is strictly reserved for an INITIAL recommendation or rejection response.
-   - For follow-up questions about a decision you already explained, answer conversationally and briefly — a sentence or two — and do NOT repeat the full structured breakdown unless the user explicitly asks you to re-explain it in full detail.
-
-10. INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
-   - When asked about required documents, the application process, or how eligibility works on InsuranceAI, answer based ONLY on how InsuranceAI actually works, not general insurance industry practices.
-   - This platform requires exactly these ${REQUIRED_DOCUMENT_TYPES.length} document types for every application:
-${REQUIRED_DOCUMENTS_FORMATTED}
-   - No address proof or other document types are collected by InsuranceAI. Never state that address proof is required.
-   - If a user asks a broader conceptual question (e.g. "what's a co-payment") that isn't about this platform specifically, general insurance knowledge is fine — but anything about what THIS app requires or how it works must reflect the actual implementation, not generic assumptions.
-
-11. CONVERSATION SIDEBAR TITLE / SHORT DESCRIPTION (MANDATORY FORMAT):
-    - At the end of your response, on its own line, you MUST provide a concise 3 to 6 word title or short description summarizing the topic of this consultation based on the user's initial inquiry or situation, suitable for display in the sidebar chat list (e.g. "CHAT_TITLE: Senior Health Policy Assessment", "CHAT_TITLE: Family Term Plan Search", "CHAT_TITLE: Individual Health Policy Fit").
-    - Format: CHAT_TITLE: <3 to 6 words>
-    - Keep it clean, descriptive, title-cased, and without quotes or trailing punctuation.`;
+MANDATORY FOOTERS (at the very end, each on its own line):
+CHAT_TITLE: <3 to 6 words>
+RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: []`;
 
         geminiPayload = {
           system_instruction: {
@@ -547,7 +516,7 @@ ${REQUIRED_DOCUMENTS_FORMATTED}
           contents: priorContents,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 8192,
+            maxOutputTokens: 1024,
             thinkingConfig: {
               thinkingLevel: "low",
             },
@@ -697,55 +666,41 @@ CHAT_TITLE: <3 to 6 words>
       assistantReply = assistantReply.replace(recTagRegex, "").trim();
     }
 
-    // ── Safety net & auto-repair for policy recommendations ──
-    // Ensure publishedPolicies is loaded
-    if (!publishedPolicies || publishedPolicies.length === 0) {
-      const { data: pubPolicies } = await adminClient
-        .from("policies")
-        .select("id, name, description, category")
-        .eq("status", "published");
-      publishedPolicies = pubPolicies || [];
-    }
-
+    // ── Check if response indicates ineligibility or no match ──
     const replyLower = assistantReply.toLowerCase();
-    for (const p of publishedPolicies) {
-      if (
-        (p.name && replyLower.includes(p.name.toLowerCase())) ||
-        replyLower.includes(p.id.toLowerCase())
-      ) {
-        if (!recommendedPolicyIds.includes(p.id)) {
-          recommendedPolicyIds.push(p.id);
-        }
-      }
-    }
-
-    // Auto-repair missing links or sentences ending with "detail page:"
-    for (const policyId of recommendedPolicyIds) {
-      const policy = publishedPolicies.find((p: any) => p.id === policyId);
-      if (!policy) continue;
-
-      const linkUrl = `/client/policies/${policy.id}`;
-      if (!assistantReply.includes(linkUrl)) {
-        if (/detail page:\s*$/i.test(assistantReply)) {
-          assistantReply = assistantReply.replace(
-            /detail page:\s*$/i,
-            `detail page: [Apply for ${policy.name}](${linkUrl})`
-          );
-        } else {
-          assistantReply += `\n\n👉 [Apply for ${policy.name}](${linkUrl})`;
-        }
-      }
-    }
-
-    // Fallback: If assistant ends with "detail page:" but no policy was matched yet, use first published policy
-    if (/detail page:\s*$/i.test(assistantReply) && publishedPolicies.length > 0) {
-      const firstPolicy = publishedPolicies[0];
-      assistantReply = assistantReply.replace(
-        /detail page:\s*$/i,
-        `detail page: [Apply for ${firstPolicy.name}](/client/policies/${firstPolicy.id})`
+    const isIneligibleOrNoMatch =
+      /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit/i.test(
+        replyLower
       );
-      if (!recommendedPolicyIds.includes(firstPolicy.id)) {
-        recommendedPolicyIds.push(firstPolicy.id);
+
+    if (isIneligibleOrNoMatch) {
+      // Applicant is ineligible: MUST NEVER output recommended policy IDs or apply links!
+      recommendedPolicyIds = [];
+    } else {
+      // Applicant is eligible: Auto-repair missing links only for actually qualified policies
+      if (!publishedPolicies || publishedPolicies.length === 0) {
+        const { data: pubPolicies } = await adminClient
+          .from("policies")
+          .select("id, name, description, category")
+          .eq("status", "published");
+        publishedPolicies = pubPolicies || [];
+      }
+
+      for (const policyId of recommendedPolicyIds) {
+        const policy = publishedPolicies.find((p: any) => p.id === policyId);
+        if (!policy) continue;
+
+        const linkUrl = `/client/policies/${policy.id}`;
+        if (!assistantReply.includes(linkUrl)) {
+          if (/detail page:\s*$/i.test(assistantReply)) {
+            assistantReply = assistantReply.replace(
+              /detail page:\s*$/i,
+              `detail page: [Apply for ${policy.name}](${linkUrl})`
+            );
+          } else {
+            assistantReply += `\n\n👉 [Apply for ${policy.name}](${linkUrl})`;
+          }
+        }
       }
     }
 
