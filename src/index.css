@@ -1981,10 +1981,166 @@ textarea.form-control:focus {
   color: var(--color-text-secondary);
 }
 
-.metric-value {
-  font-size: 0.9375rem;
-  font-weight: 700;
+/* ── Interactive Metric Chips ── */
+.metric-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.metric-chip:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.metric-chip.active {
+  background: #ffffff;
+  border-color: var(--color-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* ── Rules Tab Navigation Bar ── */
+.rules-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rules-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font-family: inherit;
+}
+
+.rules-tab-btn:hover {
+  border-color: var(--color-border-hover, #cbd5e1);
   color: var(--color-text-primary);
+  background: var(--color-surface-2);
+}
+
+.rules-tab-btn.active {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.rules-tab-btn.tab-issues.active {
+  border-color: #fca5a5;
+  background: #fff5f5;
+  color: #991b1b;
+}
+
+.rules-tab-btn.tab-satisfied.active {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.rules-tab-btn.tab-unclear.active {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.rules-tab-btn.tab-all.active {
+  border-color: var(--color-accent);
+  background: #ffffff;
+  color: var(--color-accent);
+}
+
+.rules-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-issue {
+  background: #dc2626;
+}
+
+.dot-satisfied {
+  background: #16a34a;
+}
+
+.dot-unclear {
+  background: #d97706;
+}
+
+.rules-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.badge-issues {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.badge-satisfied {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.badge-unclear {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.badge-neutral {
+  background: var(--color-surface-2);
+  color: var(--color-text-secondary);
+}
+
+/* ── Reason Item Evidence Toggle ── */
+.reason-evidence-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.reason-evidence-toggle:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover, #cbd5e1);
 }
 
 /* ── Reasons Section & Groupings ── */

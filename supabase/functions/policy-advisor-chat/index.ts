@@ -388,10 +388,10 @@ Deno.serve(async (req: Request) => {
         // Build current turn parts
         const currentTurnParts: any[] = [];
 
-        // Add Catalog Summary
+        // Add Catalog Summary with direct markdown links
         let catalogText = "=== OFFICIAL PUBLISHED POLICIES CATALOG ===\n";
         for (const p of publishedPolicies) {
-          catalogText += `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${p.category}\n  Description: ${p.description || "N/A"}\n\n`;
+          catalogText += `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${p.category}\n  Description: ${p.description || "N/A"}\n  Direct Link: [Apply for ${p.name}](/client/policies/${p.id})\n\n`;
         }
         currentTurnParts.push({ text: catalogText });
 
@@ -439,7 +439,7 @@ Deno.serve(async (req: Request) => {
         }
 
         currentTurnParts.push({
-          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nINSTRUCTIONS FOR THIS RESPONSE:\n1. STRICT HARD-CONSTRAINT CHECK: Before recommending any policy, check all hard criteria in the policy documents (especially age limits, medical exclusions, and income thresholds) against the applicant's uploaded documents and details.\n2. DO NOT recommend a policy if the applicant violates a hard rule (e.g. if the policy requires age 18-60, but the applicant's age proof shows they are outside that range). Explicitly state the disqualifying reason and policy rule instead.\n3. If eligible, recommend the policy with plain-language reasoning and format it as [Policy Name](/client/policies/<policy_id>).\n4. Explicitly state this is preliminary guidance, not a binding decision. If a policy is recommended, include the mandatory application CTA link.\n5. Append CHAT_TITLE: <3 to 6 words> on its own line summarizing the consultation topic for the sidebar.\n6. Append the structured list at the very end on a new line: RECOMMENDED_POLICY_IDS: [<policy_id>, ...] or RECOMMENDED_POLICY_IDS: [] if none qualify.`,
+          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nINSTRUCTIONS FOR THIS RESPONSE:\n1. STRICT HARD-CONSTRAINT CHECK: Before recommending any policy, check all hard criteria in the policy documents (especially age limits, medical exclusions, and income thresholds) against the applicant's uploaded documents and details.\n2. DO NOT recommend a policy if the applicant violates a hard rule (e.g. if the policy requires age 18-60, but the applicant's age proof shows they are outside that range). Explicitly state the disqualifying reason and policy rule instead.\n3. If eligible, recommend the policy with plain-language reasoning and copy its EXACT link from the catalog above: [Apply for <Policy Name>](/client/policies/<policy_id>).\n4. MANDATORY LINK RULE: After your preliminary guidance disclaimer, if a policy is recommended, you MUST provide the direct clickable link to apply, e.g.:\n"To get an official eligibility decision, submit an application on the [Apply for <Policy Name>](/client/policies/<policy_id>) page." NEVER end a message with "detail page:" without the markdown link!\n5. Append CHAT_TITLE: <3 to 6 words> on its own line summarizing the consultation topic for the sidebar.\n6. Append the structured list at the very end on a new line: RECOMMENDED_POLICY_IDS: [<policy_id>, ...] or RECOMMENDED_POLICY_IDS: [] if none qualify.`,
         });
 
         // Build multi-turn history excluding the current turn (since we provide currentTurnParts)
@@ -684,6 +684,58 @@ CHAT_TITLE: <3 to 6 words>
 
       // Strip the tag line from user-facing assistant reply
       assistantReply = assistantReply.replace(recTagRegex, "").trim();
+    }
+
+    // ── Safety net & auto-repair for policy recommendations ──
+    // Ensure publishedPolicies is loaded
+    if (!publishedPolicies || publishedPolicies.length === 0) {
+      const { data: pubPolicies } = await adminClient
+        .from("policies")
+        .select("id, name, description, category")
+        .eq("status", "published");
+      publishedPolicies = pubPolicies || [];
+    }
+
+    const replyLower = assistantReply.toLowerCase();
+    for (const p of publishedPolicies) {
+      if (
+        (p.name && replyLower.includes(p.name.toLowerCase())) ||
+        replyLower.includes(p.id.toLowerCase())
+      ) {
+        if (!recommendedPolicyIds.includes(p.id)) {
+          recommendedPolicyIds.push(p.id);
+        }
+      }
+    }
+
+    // Auto-repair missing links or sentences ending with "detail page:"
+    for (const policyId of recommendedPolicyIds) {
+      const policy = publishedPolicies.find((p: any) => p.id === policyId);
+      if (!policy) continue;
+
+      const linkUrl = `/client/policies/${policy.id}`;
+      if (!assistantReply.includes(linkUrl)) {
+        if (/detail page:\s*$/i.test(assistantReply)) {
+          assistantReply = assistantReply.replace(
+            /detail page:\s*$/i,
+            `detail page: [Apply for ${policy.name}](${linkUrl})`
+          );
+        } else {
+          assistantReply += `\n\n👉 [Apply for ${policy.name}](${linkUrl})`;
+        }
+      }
+    }
+
+    // Fallback: If assistant ends with "detail page:" but no policy was matched yet, use first published policy
+    if (/detail page:\s*$/i.test(assistantReply) && publishedPolicies.length > 0) {
+      const firstPolicy = publishedPolicies[0];
+      assistantReply = assistantReply.replace(
+        /detail page:\s*$/i,
+        `detail page: [Apply for ${firstPolicy.name}](/client/policies/${firstPolicy.id})`
+      );
+      if (!recommendedPolicyIds.includes(firstPolicy.id)) {
+        recommendedPolicyIds.push(firstPolicy.id);
+      }
     }
 
     // Extract chat_title from assistant response if present

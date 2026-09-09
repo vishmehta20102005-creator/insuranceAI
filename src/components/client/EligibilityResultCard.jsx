@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 
 /**
  * Renders the full eligibility assessment results:
  * - Verdict banner with calm, clear messaging
  * - Confidence score and executive summary
- * - Grouped checklist of rules: Issues Found (blocking first), Needs Clarification, Requirements Met
- * - Document evidence and policy citations for full transparency
+ * - Interactive filter tabs: Issues Found (active by default), Requirements Met, Needs Clarification, All Rules
+ * - Document evidence and policy citations with collapsible details for satisfied rules
  * - Actionable CTA for resubmission if not eligible or needs review
  */
 export default function EligibilityResultCard({
@@ -48,6 +48,10 @@ export default function EligibilityResultCard({
 
     return { issues: issuesList, unclear: unclearList, satisfied: satisfiedList };
   }, [reasons]);
+
+  // Default active tab to 'issues' if issues exist, else 'unclear', else 'satisfied'
+  const defaultTab = issues.length > 0 ? 'issues' : unclear.length > 0 ? 'unclear' : 'satisfied';
+  const [activeTab, setActiveTab] = useState(defaultTab);
 
   // Configure banner appearance and copy per current status
   const bannerConfig = {
@@ -247,35 +251,109 @@ export default function EligibilityResultCard({
             </div>
           )}
 
-          {/* Scannable metrics bar */}
+          {/* Scannable interactive metrics bar */}
           <div className="eligibility-metrics-bar">
-            <div className="metric-item">
+            <button
+              type="button"
+              className={`metric-chip ${activeTab === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveTab('all')}
+              title="Show all rules verified"
+            >
               <span className="metric-label">Rules Verified</span>
               <span className="metric-value">{reasons.length}</span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Requirements Met</span>
-              <span className="metric-value" style={{ color: '#16a34a' }}>{satisfied.length}</span>
-            </div>
+            </button>
             {issues.length > 0 && (
-              <div className="metric-item">
+              <button
+                type="button"
+                className={`metric-chip metric-chip-issues ${activeTab === 'issues' ? 'active' : ''}`}
+                onClick={() => setActiveTab('issues')}
+                title="Filter to issues to resolve"
+              >
                 <span className="metric-label">Issues Found</span>
                 <span className="metric-value" style={{ color: '#dc2626' }}>{issues.length}</span>
-              </div>
+              </button>
             )}
             {unclear.length > 0 && (
-              <div className="metric-item">
+              <button
+                type="button"
+                className={`metric-chip metric-chip-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
+                onClick={() => setActiveTab('unclear')}
+                title="Filter to items needing clarification"
+              >
                 <span className="metric-label">Needs Clarification</span>
                 <span className="metric-value" style={{ color: '#d97706' }}>{unclear.length}</span>
-              </div>
+              </button>
+            )}
+            {satisfied.length > 0 && (
+              <button
+                type="button"
+                className={`metric-chip metric-chip-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
+                onClick={() => setActiveTab('satisfied')}
+                title="Filter to requirements met"
+              >
+                <span className="metric-label">Requirements Met</span>
+                <span className="metric-value" style={{ color: '#16a34a' }}>{satisfied.length}</span>
+              </button>
             )}
           </div>
         </div>
 
-        {/* ── 3. GROUPED REASONS LIST ── */}
+        {/* ── 3. FILTER TABS & GROUPED REASONS LIST ── */}
+        <div className="rules-tab-bar" role="tablist" aria-label="Filter rules by status">
+          {issues.length > 0 && (
+            <button
+              type="button"
+              className={`rules-tab-btn tab-issues ${activeTab === 'issues' ? 'active' : ''}`}
+              onClick={() => setActiveTab('issues')}
+              role="tab"
+              aria-selected={activeTab === 'issues'}
+            >
+              <span className="rules-tab-dot dot-issue" />
+              <span>Issues to Resolve</span>
+              <span className="rules-tab-count badge-issues">{issues.length}</span>
+            </button>
+          )}
+          {unclear.length > 0 && (
+            <button
+              type="button"
+              className={`rules-tab-btn tab-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
+              onClick={() => setActiveTab('unclear')}
+              role="tab"
+              aria-selected={activeTab === 'unclear'}
+            >
+              <span className="rules-tab-dot dot-unclear" />
+              <span>Needs Clarification</span>
+              <span className="rules-tab-count badge-unclear">{unclear.length}</span>
+            </button>
+          )}
+          {satisfied.length > 0 && (
+            <button
+              type="button"
+              className={`rules-tab-btn tab-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
+              onClick={() => setActiveTab('satisfied')}
+              role="tab"
+              aria-selected={activeTab === 'satisfied'}
+            >
+              <span className="rules-tab-dot dot-satisfied" />
+              <span>Requirements Met</span>
+              <span className="rules-tab-count badge-satisfied">{satisfied.length}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className={`rules-tab-btn tab-all ${activeTab === 'all' ? 'active' : ''}`}
+            onClick={() => setActiveTab('all')}
+            role="tab"
+            aria-selected={activeTab === 'all'}
+          >
+            <span>All Rules</span>
+            <span className="rules-tab-count badge-neutral">{reasons.length}</span>
+          </button>
+        </div>
+
         <div className="reasons-section">
           {/* GROUP A: ISSUES FOUND (Violations & Blocking) */}
-          {issues.length > 0 && (
+          {(activeTab === 'issues' || activeTab === 'all') && issues.length > 0 && (
             <div className="reasons-group issues-group">
               <div className="reasons-group-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -302,7 +380,7 @@ export default function EligibilityResultCard({
           )}
 
           {/* GROUP B: NEEDS CLARIFICATION (Unclear / Warnings) */}
-          {unclear.length > 0 && (
+          {(activeTab === 'unclear' || activeTab === 'all') && unclear.length > 0 && (
             <div className="reasons-group unclear-group">
               <div className="reasons-group-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -329,7 +407,7 @@ export default function EligibilityResultCard({
           )}
 
           {/* GROUP C: REQUIREMENTS MET (Satisfied) */}
-          {satisfied.length > 0 && (
+          {(activeTab === 'satisfied' || activeTab === 'all') && satisfied.length > 0 && (
             <div className="reasons-group satisfied-group">
               <div className="reasons-group-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -388,6 +466,9 @@ export default function EligibilityResultCard({
  */
 function ReasonItem({ reason, type }) {
   const isBlocking = reason.severity === 'blocking';
+  // For satisfied items, collapse evidence by default to eliminate long vertical scrolling
+  const [showEvidence, setShowEvidence] = useState(type !== 'satisfied');
+  const hasEvidence = Boolean(reason.client_evidence || reason.policy_source);
 
   return (
     <div className={`reason-card reason-card-${type} ${isBlocking ? 'reason-blocking' : ''}`}>
@@ -418,16 +499,43 @@ function ReasonItem({ reason, type }) {
           </div>
         </div>
 
-        {/* Show severity ONLY when it is 'blocking' */}
-        {isBlocking && (
-          <span className="severity-tag severity-blocking" title="This requirement is a blocking criteria">
-            Blocking
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {isBlocking && (
+            <span className="severity-tag severity-blocking" title="This requirement is a blocking criteria">
+              Blocking
+            </span>
+          )}
+
+          {/* Toggle for satisfied evidence */}
+          {type === 'satisfied' && hasEvidence && (
+            <button
+              type="button"
+              className="reason-evidence-toggle"
+              onClick={() => setShowEvidence((prev) => !prev)}
+              title={showEvidence ? 'Hide verification evidence' : 'View verification evidence'}
+            >
+              <span>{showEvidence ? 'Hide Details' : 'View Details'}</span>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                style={{
+                  transform: showEvidence ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.15s ease',
+                }}
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Client Evidence Callout */}
-      {reason.client_evidence && (
+      {showEvidence && reason.client_evidence && (
         <div className="reason-evidence-block">
           <div className="evidence-header">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -441,7 +549,7 @@ function ReasonItem({ reason, type }) {
       )}
 
       {/* Policy Source Citation */}
-      {reason.policy_source && (
+      {showEvidence && reason.policy_source && (
         <div className="reason-source-citation">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />

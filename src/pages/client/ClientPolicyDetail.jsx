@@ -59,6 +59,7 @@ export default function ClientPolicyDetail() {
   const [eligibilityResult, setEligibilityResult] = useState(null);
   const [loadingResult,     setLoadingResult]     = useState(false);
   const [viewingDocId,  setViewingDocId]  = useState(null);
+  const [showSubmittedDocs, setShowSubmittedDocs] = useState(false);
 
   const fileInputRefs = useRef({}); // { [type]: HTMLInputElement }
 
@@ -501,18 +502,33 @@ export default function ClientPolicyDetail() {
                                 ? 'Your documents are being analyzed by AI. Please wait for results.'
                                 : submission.status === 'eligible'
                                 ? 'Your application has been verified as eligible. Thank you!'
-                                : 'Your application has been approved. Thank you!'}
+                                : submission.status === 'approved'
+                                ? 'Your application has been approved. Thank you!'
+                                : null}
                             </p>
                           )}
                         </div>
                       ) : (
                         /* Submitted Documents Card shown when EligibilityResultCard is visible */
                         <div className="card" style={{ marginBottom: '28px' }}>
-                          <div className="card-header" style={{ marginBottom: '14px' }}>
+                          <div
+                            className="card-header"
+                            style={{
+                              marginBottom: showSubmittedDocs ? '14px' : '0',
+                              cursor: 'pointer',
+                              userSelect: 'none',
+                            }}
+                            onClick={() => setShowSubmittedDocs((prev) => !prev)}
+                          >
                             <div>
-                              <h3 style={{ fontSize: '1.0625rem', fontWeight: 600, margin: 0, color: 'var(--color-text-primary)' }}>
-                                Submitted Application Documents
-                              </h3>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <h3 style={{ fontSize: '1.0625rem', fontWeight: 600, margin: 0, color: 'var(--color-text-primary)' }}>
+                                  Submitted Application Documents
+                                </h3>
+                                <span className="doc-count-pill">
+                                  {submission.submission_documents?.length || 0} documents
+                                </span>
+                              </div>
                               <p className="card-subtitle" style={{ marginTop: '4px' }}>
                                 Uploaded on{' '}
                                 {new Date(submission.submitted_at).toLocaleDateString(undefined, {
@@ -520,13 +536,35 @@ export default function ClientPolicyDetail() {
                                 })}
                               </p>
                             </div>
-                            <span className="doc-count-pill">
-                              {submission.submission_documents?.length || 0} documents
-                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ gap: '6px' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowSubmittedDocs((prev) => !prev);
+                              }}
+                            >
+                              <span>{showSubmittedDocs ? 'Hide Documents' : 'View Documents'}</span>
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                style={{
+                                  transform: showSubmittedDocs ? 'rotate(180deg)' : 'rotate(0deg)',
+                                  transition: 'transform 0.15s ease',
+                                }}
+                              >
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            </button>
                           </div>
 
-                          {submission.submission_documents?.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {showSubmittedDocs && submission.submission_documents?.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
                               {submission.submission_documents.map((doc) => {
                                 const meta = REQUIRED_DOC_TYPES.find((d) => d.type === doc.document_type);
                                 return (
@@ -568,14 +606,6 @@ export default function ClientPolicyDetail() {
                                 );
                               })}
                             </div>
-                          )}
-
-                          {isBlocked && (
-                            <p style={{ marginTop: '16px', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-                              {submission.status === 'eligible'
-                                ? 'Your application has been verified as eligible. Thank you!'
-                                : 'Your application has been approved. Thank you!'}
-                            </p>
                           )}
                         </div>
                       )}

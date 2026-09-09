@@ -117,10 +117,31 @@ function normalizeMarkdown(text) {
  * and inline formatted text (bold, italic, inline code, links).
  * Policy recommendation cards are rendered STRICTLY from recommendedPolicyIds.
  */
-function FormattedAssistantMessage({ content, policiesMap, recommendedPolicyIds = [] }) {
-  // Build policy cards strictly from recommendedPolicyIds
+function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolicyIds = [] }) {
+  // Collect policy IDs from explicit recommendedPolicyIds, markdown links, and name mentions
+  const detectedIds = new Set(recommendedPolicyIds || []);
+
+  if (content && policiesMap) {
+    // 1. Check for /client/policies/<uuid> links in the content
+    const linkMatches = content.matchAll(/\/client\/policies\/([a-f0-9-]{36})/gi);
+    for (const match of linkMatches) {
+      if (policiesMap[match[1]]) {
+        detectedIds.add(match[1]);
+      }
+    }
+
+    // 2. Check for policy names mentioned in content
+    const contentLower = content.toLowerCase();
+    for (const [id, pol] of Object.entries(policiesMap)) {
+      if (pol?.name && pol.name.length > 4 && contentLower.includes(pol.name.toLowerCase())) {
+        detectedIds.add(id);
+      }
+    }
+  }
+
+  // Build policy cards
   const policyCards = [];
-  const uniqueIds = Array.from(new Set(recommendedPolicyIds || []));
+  const uniqueIds = Array.from(detectedIds);
 
   for (const policyId of uniqueIds) {
     const policyObj = policiesMap[policyId];
@@ -145,6 +166,17 @@ function FormattedAssistantMessage({ content, policiesMap, recommendedPolicyIds 
       .replace(/^(`{3,}|'{3,})[a-zA-Z]*\n?/, '')
       .replace(/\n?(`{3,}|'{3,})$/, '')
       .trim();
+  }
+
+  // Safety repair for historical messages ending with "detail page:" without a link
+  if (/detail page:\s*$/i.test(cleanContent) && uniqueIds.length > 0) {
+    const matchedPol = policiesMap[uniqueIds[0]];
+    if (matchedPol) {
+      cleanContent = cleanContent.replace(
+        /detail page:\s*$/i,
+        `detail page: [Apply for ${matchedPol.name}](/client/policies/${matchedPol.id})`
+      );
+    }
   }
 
   const lines = cleanContent.split('\n');
