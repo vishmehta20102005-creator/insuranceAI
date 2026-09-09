@@ -165,9 +165,22 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
       contentLower
     );
 
-  const uniqueIds = (!isIneligible && Array.isArray(recommendedPolicyIds))
+  let uniqueIds = (!isIneligible && Array.isArray(recommendedPolicyIds))
     ? Array.from(new Set(recommendedPolicyIds))
     : [];
+
+  // Fallback: If recommendedPolicyIds is empty but applicant is eligible, infer matching policy from text
+  if (uniqueIds.length === 0 && !isIneligible) {
+    for (const [polId, pol] of Object.entries(policiesMap)) {
+      if (
+        contentLower.includes(pol.name.toLowerCase()) ||
+        content.includes(polId.substring(0, 16))
+      ) {
+        uniqueIds.push(polId);
+        break;
+      }
+    }
+  }
 
   // Policy recommendation cards are strictly rendered ONLY when the applicant is eligible and policies are recommended
   const policyCards = [];
@@ -195,6 +208,17 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
       .replace(/\n?(`{3,}|'{3,})$/, '')
       .trim();
   }
+
+  // Auto-repair truncated policy links in message text (e.g. [Apply for Health](/client/policies/b123075f-fc0e-4f1e-9966-2f5d)
+  for (const [polId, pol] of Object.entries(policiesMap)) {
+    const partialIdRegex = new RegExp(`\\[([^\\]]+)\\]\\(/client/policies/${polId.substring(0, 12)}[^)\\s]*\\)?`, 'gi');
+    cleanContent = cleanContent.replace(partialIdRegex, `[$1](/client/policies/${polId})`);
+
+    const trailingTruncated = new RegExp(`\\[([^\\]]+)\\]\\(/client/policies/[^)]*$`, 'gm');
+    cleanContent = cleanContent.replace(trailingTruncated, `[$1](/client/policies/${polId})`);
+  }
+  // Generic unclosed markdown link at the end of a line
+  cleanContent = cleanContent.replace(/(\[[^\]]+\]\(\/client\/policies\/[a-zA-Z0-9_-]+)(?![^(\n]*\))/g, '$1)');
 
   // Safety repair for historical messages ending with "detail page:" without a link
   if (/detail page:\s*$/i.test(cleanContent) && uniqueIds.length > 0) {

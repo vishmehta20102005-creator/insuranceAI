@@ -709,7 +709,7 @@ RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: []`;
           contents: priorContents,
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 1024,
+            maxOutputTokens: 4096,
             thinkingConfig: {
               thinkingLevel: "low",
             },
@@ -880,6 +880,31 @@ CHAT_TITLE: <3 to 6 words>
           .select("id, name, description, category")
           .eq("status", "published");
         publishedPolicies = pubPolicies || [];
+      }
+
+      // If recommendedPolicyIds is empty but applicant is eligible, infer matching policy from text
+      if (recommendedPolicyIds.length === 0) {
+        for (const policy of publishedPolicies) {
+          if (
+            replyLower.includes(policy.name.toLowerCase()) ||
+            assistantReply.includes(policy.id.substring(0, 16))
+          ) {
+            recommendedPolicyIds.push(policy.id);
+            break;
+          }
+        }
+      }
+
+      // Auto-repair any unclosed or truncated policy links in assistantReply
+      for (const policy of publishedPolicies) {
+        const partialId = policy.id.substring(0, 16);
+        // If there is an unclosed markdown link or truncated UUID
+        const truncatedRegex = new RegExp(`\\[([^\\]]+)\\]\\(/client/policies/${partialId}[^)\\s]*\\)?`, "gi");
+        assistantReply = assistantReply.replace(truncatedRegex, `[$1](/client/policies/${policy.id})`);
+
+        // If text ends with an unclosed [Apply for <Name>](/client/policies/...
+        const trailingTruncated = new RegExp(`\\[([^\\]]+)\\]\\(/client/policies/[^)]*$`, "gm");
+        assistantReply = assistantReply.replace(trailingTruncated, `[$1](/client/policies/${policy.id})`);
       }
 
       for (const policyId of recommendedPolicyIds) {
