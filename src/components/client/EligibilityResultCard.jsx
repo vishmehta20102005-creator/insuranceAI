@@ -1,6 +1,20 @@
 import { useState, useMemo } from 'react';
 
 /**
+ * Parses inline bold **...** and clean text for display without raw markdown asterisks
+ */
+function renderFormattedText(text) {
+  if (!text || typeof text !== 'string') return text;
+  const boldParts = text.split(/(\*\*[^*]+\*\*)/g);
+  return boldParts.map((bPart, bIdx) => {
+    if (bPart.startsWith('**') && bPart.endsWith('**') && bPart.length >= 4) {
+      return <strong key={`b-${bIdx}`}>{bPart.slice(2, -2)}</strong>;
+    }
+    return bPart;
+  });
+}
+
+/**
  * Renders the full eligibility assessment results:
  * - Verdict banner with calm, clear messaging
  * - Confidence score and executive summary
@@ -222,7 +236,7 @@ export default function EligibilityResultCard({
 
           {result.summary && (
             <p className="eligibility-summary-text">
-              {result.summary}
+              {renderFormattedText(result.summary)}
             </p>
           )}
 
@@ -544,7 +558,7 @@ function ReasonItem({ reason, type }) {
             </svg>
             <span>Evidence from your documents</span>
           </div>
-          <p className="evidence-text">{reason.client_evidence}</p>
+          <p className="evidence-text">{renderFormattedText(reason.client_evidence)}</p>
         </div>
       )}
 

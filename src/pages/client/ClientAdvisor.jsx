@@ -97,17 +97,53 @@ function isRecommendationQuery(text = '', hasFile = false) {
 
 /**
  * Normalizes text: strips code-block wrappers, fixes localhost URLs to relative paths,
+ * converts single/dangling asterisk headings and labels into proper markdown bold,
  * and fixes dangling unclosed bold tags.
  */
 function normalizeMarkdown(text) {
   if (!text) return '';
   let cleaned = text;
 
-  // Normalize absolute internal policy links (e.g., http://localhost:5173/client/policies/... -> /client/policies/...)
+  // 1. Normalize absolute internal policy links to relative paths
   cleaned = cleaned.replace(/https?:\/\/[^/]+(\/client\/policies\/[a-zA-Z0-9_-]+)/g, '$1');
 
-  // Fix dangling unclosed bold before links: e.g. **[Health](...) without closing **
+  // 2. Fix dangling unclosed bold before links: e.g. **[Health](...) without closing **
   cleaned = cleaned.replace(/\*\*(\[[^\]]+\]\([^)]+\))(?!\*\*)/g, '**$1**');
+
+  // Prefix pattern for multiline headings: bullet character (•), dash/plus (- or +), or markdown bullet (* followed by space)
+  const P = "(^[ \\t]*(?:[•\\-+]|\\*[ \\t]+)?[ \\t]*)";
+
+  // 3. Standalone single-asterisk headings or labels:
+  // e.g. *Applicant Details:* -> **Applicant Details:**
+  // e.g. *Ineligibility Assessment Details* -> **Ineligibility Assessment Details**
+  // e.g. *1. What is a Deductible?* -> **1. What is a Deductible?**
+  cleaned = cleaned.replace(new RegExp(P + "\\*([^*\\r\\n]+)\\*([ \\t]*:|[ \\t]*$)", "gm"), (m, p, content, colon) => {
+    return (p || "") + "**" + content.trim() + "**" + (colon ? colon.trim() : "");
+  });
+
+  // 4. Single-asterisk label with colon inline:
+  // e.g. *Policy:* [Health] -> **Policy:** [Health]
+  cleaned = cleaned.replace(/(^|[ \t]+)\*([^*\\r\\n:]+):\*(?=[ \t]|$)/gm, "$1**$2:** ");
+
+  // 5. Trailing asterisk after colon without opening asterisk:
+  // e.g. •Name:* Rajesh Kumar -> • **Name:** Rajesh Kumar
+  // e.g. Policy:* [Health] -> **Policy:** [Health]
+  cleaned = cleaned.replace(new RegExp(P + "([A-Za-z0-9 \\t&/—–\\-()]+):\\*", "gm"), "$1**$2:**");
+
+  // 6. Trailing asterisk at end of line without opening:
+  // e.g. • Ineligibility Assessment Details* -> • **Ineligibility Assessment Details**
+  // e.g. 1. What is a Deductible?* -> 1. **What is a Deductible?**
+  cleaned = cleaned.replace(new RegExp("(^[ \\t]*(?:[•\\-+]|\\*[ \\t]+|\\d+\\.[ \\t]*)?[ \\t]*)([A-Za-z0-9 \\t&/—–\\-()?]+)\\*[ \\t]*$", "gm"), (m, p, c) => {
+    return (p || "") + "**" + c.trim() + "**";
+  });
+
+  // 7. Unclosed single asterisk at start of line:
+  // e.g. *Applicant Details: -> **Applicant Details:**
+  cleaned = cleaned.replace(new RegExp(P + "\\*([A-Za-z0-9 \\t&/—–\\-()]+):", "gm"), "$1**$2:**");
+
+  // 8. Clean empty bold tags or double formatting
+  cleaned = cleaned.replace(/\*\*[ \\t]*\*\*/g, "");
+  cleaned = cleaned.replace(/\*\*:\*\*/g, ":");
 
   return cleaned;
 }
@@ -167,6 +203,9 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
     }
   }
 
+  // Normalize markdown formatting across full message before line splitting
+  cleanContent = normalizeMarkdown(cleanContent);
+
   const lines = cleanContent.split('\n');
 
   return (
@@ -215,9 +254,17 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
           );
         }
 
-        // Bullet list items (handles "• ", "•", "- ", "* ", "+ ")
-        if (/^[•\-*+]\s*/.test(trimmed)) {
-          const itemText = trimmed.replace(/^[•\-*+]\s*/, '');
+        // Bullet list items:
+        // Must handle explicit bullet characters (•) or markdown list markers (-, +, *)
+        // CRITICAL: A markdown list marker (-, +, *) MUST be followed by whitespace (\s+),
+        // and MUST NOT be bold syntax (**), divider (*** or ---), or italic (*word*).
+        const isBulletDot = /^•\s*/.test(trimmed);
+        const isMarkdownBullet = /^[-+*]\s+/.test(trimmed) && !trimmed.startsWith('***') && !trimmed.startsWith('---') && !trimmed.startsWith('**');
+
+        if (isBulletDot || isMarkdownBullet) {
+          const itemText = isBulletDot
+            ? trimmed.replace(/^•\s*/, '')
+            : trimmed.replace(/^[-+*]\s+/, '');
           return (
             <div key={idx} className="advisor-bullet-item">
               <span className="advisor-bullet-dot">•</span>
@@ -226,11 +273,14 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
           );
         }
 
-        // Numbered list items (handles "1. ", "2. ")
-        if (/^\d+\.\s*/.test(trimmed)) {
-          const numberMatch = trimmed.match(/^(\d+\.)\s*(.*)/);
-          const numPrefix = numberMatch ? numberMatch[1] : '';
-          const numText = numberMatch ? numberMatch[2] : trimmed;
+        // Numbered list items (handles "1. ", "2. ", or "**1. ", "**2. ")
+        const numberMatch = trimmed.match(/^(?:\*\*)?(\d+\.)[ \t]*(.*)/);
+        if (numberMatch) {
+          const numPrefix = numberMatch[1];
+          const rawRest = numberMatch[2] || '';
+          const numText = (trimmed.startsWith('**') && !rawRest.startsWith('**'))
+            ? `**${rawRest}`
+            : rawRest;
           return (
             <div key={idx} className="advisor-numbered-item">
               <span className="advisor-numbered-prefix">{numPrefix}</span>
@@ -385,7 +435,9 @@ function renderItalicAndCode(text) {
       ) {
         return <em key={`i-${cIdx}-${iIdx}`}>{iPart.slice(1, -1)}</em>;
       }
-      return iPart;
+      // Strip any lingering lone asterisks adjacent to punctuation or whitespace
+      const cleanPart = iPart.replace(/(?:^|\s)\*+(?:\s|$)/g, ' ').replace(/:\*+/g, ':');
+      return cleanPart;
     });
   });
 }
