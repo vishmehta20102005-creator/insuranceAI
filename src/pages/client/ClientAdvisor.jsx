@@ -125,21 +125,22 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
       contentLower
     );
 
+  const uniqueIds = (!isIneligible && Array.isArray(recommendedPolicyIds))
+    ? Array.from(new Set(recommendedPolicyIds))
+    : [];
+
   // Policy recommendation cards are strictly rendered ONLY when the applicant is eligible and policies are recommended
   const policyCards = [];
-  if (!isIneligible && recommendedPolicyIds && recommendedPolicyIds.length > 0) {
-    const uniqueIds = Array.from(new Set(recommendedPolicyIds));
-    for (const policyId of uniqueIds) {
-      const policyObj = policiesMap[policyId];
-      if (policyObj) {
-        policyCards.push({
-          id: policyId,
-          title: policyObj.name,
-          category: policyObj.category || 'Insurance',
-          description: policyObj.description || '',
-          path: `/client/policies/${policyId}`,
-        });
-      }
+  for (const policyId of uniqueIds) {
+    const policyObj = policiesMap[policyId];
+    if (policyObj) {
+      policyCards.push({
+        id: policyId,
+        title: policyObj.name,
+        category: policyObj.category || 'Insurance',
+        description: policyObj.description || '',
+        path: `/client/policies/${policyId}`,
+      });
     }
   }
 
