@@ -1,0 +1,11 @@
+
+[functions.check-eligibility]
+enabled = true
+verify_jwt = false
+import_map = "./functions/check-eligibility/deno.json"
+entrypoint = "./functions/check-eligibility/index.ts"
+
+[functions.policy-advisor-chat]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/policy-advisor-chat/index.ts"
