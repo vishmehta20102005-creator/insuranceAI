@@ -157,7 +157,7 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
   // Check if the response states the applicant is ineligible or disqualified
   const contentLower = (content || '').toLowerCase();
   const isIneligible =
-    /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit/i.test(
+    /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit|not a recognized insurance|invalid document|restaurant.*menu|unrelated document/i.test(
       contentLower
     );
 
@@ -639,9 +639,9 @@ export default function ClientAdvisor() {
     // Conditionally set loading indicator text
     const isDocAnalysis = isRecommendationQuery(textToSend, !!currentFile);
     setLoadingStatusText(
-      isDocAnalysis
-        ? 'Analyzing published policies & documents...'
-        : 'Thinking...'
+      currentFile
+        ? 'Reviewing uploaded document...'
+        : (isDocAnalysis ? 'Finding matching policies...' : 'Thinking...')
     );
 
     setSending(true);

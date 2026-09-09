@@ -364,8 +364,90 @@ Deno.serve(async (req: Request) => {
         .order("created_at", { ascending: true });
 
       let geminiPayload: any;
+      let isInvalidDocument = false;
+      let invalidDocType = "";
 
-      if (isRecommendation) {
+      // ── Fast Document Pre-Check for Attachments ──
+      if (attachmentData) {
+        console.log(`[policy-advisor-chat] Fast pre-checking uploaded file "${attachmentData.filename}"...`);
+        try {
+          const checkPayload = {
+            contents: [
+              {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: attachmentData.mimeType,
+                      data: uint8ArrayToBase64(attachmentData.bytes),
+                    },
+                  },
+                  {
+                    text: `Analyze this uploaded document ("${attachmentData.filename}").
+Is this document an official insurance application document (Government ID, Age Proof, Medical/Health Report, Income Proof/Salary Slip/ITR, or Insurance Policy Document)?
+Or is it an invalid/unrelated document (such as a restaurant food menu, food bill, grocery receipt, personal selfie, pet photo, meme, car photo, homework, product catalog, etc.)?
+
+Return JSON ONLY:
+{
+  "is_valid_insurance_doc": boolean,
+  "detected_type": string,
+  "brief_description": string
+}`,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 256,
+              responseMimeType: "application/json",
+              thinkingConfig: { thinkingLevel: "low" },
+            },
+          };
+
+          const checkRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(checkPayload),
+            }
+          );
+
+          if (checkRes.ok) {
+            const checkData = await checkRes.json();
+            const rawText = checkData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (rawText) {
+              const parsed = JSON.parse(rawText);
+              if (parsed.is_valid_insurance_doc === false) {
+                isInvalidDocument = true;
+                invalidDocType = parsed.detected_type || "restaurant food menu / non-insurance document";
+                console.log(`[policy-advisor-chat] Document identified as non-insurance: ${invalidDocType}`);
+              }
+            }
+          }
+        } catch (checkErr) {
+          console.warn("[policy-advisor-chat] Pre-check error (will fallback to normal pipeline):", checkErr);
+        }
+      }
+
+      if (isInvalidDocument) {
+        console.log(`[policy-advisor-chat] Returning upfront rejection for invalid document: ${invalidDocType}`);
+        assistantReply = `**Eligibility Verdict:**
+Not Eligible — The uploaded document is not a recognized insurance application document.
+
+**Document Review:**
+The uploaded file appears to be a **${invalidDocType}**, which cannot be used to verify identity, age, income, or medical eligibility for insurance underwriting.
+
+**Required Documents:**
+To evaluate your eligibility and receive personalized coverage recommendations, please upload one of our 4 accepted official documents:
+• **Government ID Proof** (Passport, Driver's License, Aadhaar, Voter ID)
+• **Recent Medical Report** (< 12 months)
+• **Income Proof** (Salary Slips, Form 16, or ITR return)
+• **Age Proof** (Birth Certificate, School Leaving Certificate, Passport)
+
+CHAT_TITLE: Invalid Document Upload
+RECOMMENDED_POLICY_IDS: []`;
+      } else if (isRecommendation) {
         console.log(`[policy-advisor-chat] Triggering Phase 4 Policy Recommendation path...`);
 
         // Fetch all published policies
@@ -503,6 +585,12 @@ MARKDOWN & FORMATTING RULES (STRICT):
 - For bullet points, always use bullet dot (• ) or dash (- ).
 
 RECOMMENDATION RULES:
+- NON-INSURANCE / UNRELATED DOCUMENTS (CRITICAL):
+  • If the uploaded document is NOT a valid insurance verification document (e.g. restaurant menu, food bill, grocery receipt, personal photo, selfie, meme):
+  • State directly and upright that the document is a non-insurance document (e.g. "The uploaded file appears to be a restaurant food menu").
+  • NEVER evaluate or cite any specific policies (do NOT mention Health, Life, or Silver 500).
+  • NEVER output policy links or recommendation cards.
+  • State the 4 accepted documents and output RECOMMENDED_POLICY_IDS: []
 - If the applicant is INELIGIBLE or NO policy matches:
   • You MUST output RECOMMENDED_POLICY_IDS: []
   • NEVER recommend an ineligible policy, NEVER say it is a preliminary fit, and NEVER tell them to apply for it.
@@ -591,66 +679,68 @@ CHAT_TITLE: <3 to 6 words>
         };
       }
 
-      const MODELS = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-      ];
-      let lastStatus = 0;
-      let lastErrBody = "";
-
-      for (const model of MODELS) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-        // Clone payload for this model so thinkingConfig is not mutated for subsequent models
-        const currentPayload = JSON.parse(JSON.stringify(geminiPayload));
-
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            console.log(`[policy-advisor-chat] Requesting ${model} (attempt ${attempt}/2)...`);
-            const res = await fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(currentPayload),
-            });
-
-            if (res.ok) {
-              const geminiData = await res.json();
-              assistantReply =
-                geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-              console.log(`[policy-advisor-chat] ✓ Got response from ${model}`);
-              break;
-            }
-
-            lastStatus = res.status;
-            lastErrBody = await res.text();
-            console.warn(`[policy-advisor-chat] ${model} attempt ${attempt} → HTTP ${res.status}`);
-
-            // If thinkingConfig is rejected by this model version, strip it for this model only
-            if (res.status === 400 && currentPayload.generationConfig?.thinkingConfig) {
-              console.log(`[policy-advisor-chat] Retrying ${model} without thinkingConfig...`);
-              delete currentPayload.generationConfig.thinkingConfig;
-              continue;
-            }
-
-            if (res.status === 503 || res.status === 429) {
-              await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
-              continue;
-            }
-            break;
-          } catch (netErr: any) {
-            lastErrBody = netErr.message;
-            console.warn(`[policy-advisor-chat] Network error on ${model}:`, netErr.message);
-          }
-        }
-        if (assistantReply) break;
-      }
-
       if (!assistantReply) {
-        console.error(
-          `[policy-advisor-chat] All Gemini models failed. Last status: ${lastStatus}:`,
-          lastErrBody
-        );
-        assistantReply =
-          "I apologize, but I am having trouble connecting to the advisory service at this moment. Please try again shortly.";
+        const MODELS = [
+          "gemini-3.6-flash",
+          "gemini-3.5-flash",
+        ];
+        let lastStatus = 0;
+        let lastErrBody = "";
+
+        for (const model of MODELS) {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+          // Clone payload for this model so thinkingConfig is not mutated for subsequent models
+          const currentPayload = JSON.parse(JSON.stringify(geminiPayload));
+
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              console.log(`[policy-advisor-chat] Requesting ${model} (attempt ${attempt}/2)...`);
+              const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(currentPayload),
+              });
+
+              if (res.ok) {
+                const geminiData = await res.json();
+                assistantReply =
+                  geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                console.log(`[policy-advisor-chat] ✓ Got response from ${model}`);
+                break;
+              }
+
+              lastStatus = res.status;
+              lastErrBody = await res.text();
+              console.warn(`[policy-advisor-chat] ${model} attempt ${attempt} → HTTP ${res.status}`);
+
+              // If thinkingConfig is rejected by this model version, strip it for this model only
+              if (res.status === 400 && currentPayload.generationConfig?.thinkingConfig) {
+                console.log(`[policy-advisor-chat] Retrying ${model} without thinkingConfig...`);
+                delete currentPayload.generationConfig.thinkingConfig;
+                continue;
+              }
+
+              if (res.status === 503 || res.status === 429) {
+                await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+                continue;
+              }
+              break;
+            } catch (netErr: any) {
+              lastErrBody = netErr.message;
+              console.warn(`[policy-advisor-chat] Network error on ${model}:`, netErr.message);
+            }
+          }
+          if (assistantReply) break;
+        }
+
+        if (!assistantReply) {
+          console.error(
+            `[policy-advisor-chat] All Gemini models failed. Last status: ${lastStatus}:`,
+            lastErrBody
+          );
+          assistantReply =
+            "I apologize, but I am having trouble connecting to the advisory service at this moment. Please try again shortly.";
+        }
       }
     }
 
