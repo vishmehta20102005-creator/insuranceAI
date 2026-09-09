@@ -1052,7 +1052,7 @@ CHAT_TITLE: <3 to 6 words>
         recommended_policy_ids: recommendedPolicyIds,
         messages: sanitizedMessages,
         attachments: allAttachments || [],
-        latest_attachment: savedAttachment,
+        latest_attachment: savedAttachments.length > 0 ? savedAttachments[0] : null,
       },
       { status: 200, headers: corsHeaders }
     );
