@@ -382,15 +382,33 @@ Deno.serve(async (req: Request) => {
                     },
                   },
                   {
-                    text: `Analyze this uploaded document ("${attachmentData.filename}").
-Is this document an official insurance application document (Government ID, Age Proof, Medical/Health Report, Income Proof/Salary Slip/ITR, or Insurance Policy Document)?
-Or is it an invalid/unrelated document (such as a restaurant food menu, food bill, grocery receipt, personal selfie, pet photo, meme, car photo, homework, product catalog, etc.)?
+                    text: `You are an intake document classifier for InsuranceAI.
+Evaluate this uploaded document ("${attachmentData.filename}") against insurance underwriting standards.
+
+ACCEPTED INSURANCE APPLICATION DOCUMENTS (ONLY THESE):
+1. Government Photo ID (Passport, Driver's License, Aadhaar, Voter ID, PAN Card)
+2. Age Proof (Birth Certificate, 10th Class Board Passing Certificate with explicit Date of Birth, Passport)
+3. Income Proof (Official Salary Slips from employer, Form 16, ITR / Income Tax Return)
+4. Medical / Health Diagnostic Report (< 12 months, hospital or pathology lab report)
+5. Existing Insurance Policy Document
+
+NOT ACCEPTED / INVALID / UNRELATED DOCUMENTS (MUST RETURN is_valid_insurance_doc: false):
+- Academic records: University / College Marksheets, Semester Grade Cards, Academic Transcripts, Degrees, Diplomas, Course Completion Certificates, Student IDs, Homework (academic marksheets do NOT verify age, income, or medical eligibility for insurance underwriting)
+- Receipts & bills: Restaurant menus, food delivery receipts, grocery bills, retail invoices, utility bills
+- Personal media: Personal selfies, pet photos, vehicle photos, landscape photos, memes, wallpapers
+- Generic documents: Resumes, CVs, letters, random notes, contracts unrelated to insurance
+
+Examine the uploaded document and determine what it actually is.
+If it is a university marksheet, semester grade card, college transcript, restaurant menu, grocery bill, or other non-accepted document:
+Set "is_valid_insurance_doc": false
+Set "detected_type": concise accurate name (e.g. "university marksheet", "college grade card", "academic transcript", "restaurant food menu", "grocery receipt")
+Set "reason": 1 sentence explaining why it is not an accepted document for insurance underwriting.
 
 Return JSON ONLY:
 {
   "is_valid_insurance_doc": boolean,
   "detected_type": string,
-  "brief_description": string
+  "reason": string
 }`,
                   },
                 ],
@@ -420,7 +438,7 @@ Return JSON ONLY:
               const parsed = JSON.parse(rawText);
               if (parsed.is_valid_insurance_doc === false) {
                 isInvalidDocument = true;
-                invalidDocType = parsed.detected_type || "restaurant food menu / non-insurance document";
+                invalidDocType = parsed.detected_type || "non-insurance document";
                 console.log(`[policy-advisor-chat] Document identified as non-insurance: ${invalidDocType}`);
               }
             }
@@ -433,19 +451,21 @@ Return JSON ONLY:
       if (isInvalidDocument) {
         console.log(`[policy-advisor-chat] Returning upfront rejection for invalid document: ${invalidDocType}`);
         assistantReply = `**Eligibility Verdict:**
-Not Eligible — The uploaded document is not a recognized insurance application document.
+Not Eligible — The submitted document is not an accepted document for insurance verification.
 
-**Document Review:**
-The uploaded file appears to be a **${invalidDocType}**, which cannot be used to verify identity, age, income, or medical eligibility for insurance underwriting.
+**Suitability Assessment:**
+• The uploaded document appears to be a **${invalidDocType}**, which cannot be used to verify your identity, age, income, or medical status for insurance underwriting.
+• Academic documents (such as university marksheets or college transcripts) do not satisfy underwriting requirements for age, income, or health verification.
+• We cannot evaluate or issue an insurance policy based on this document.
+• Please upload the required verification documents listed below.
 
 **Required Documents:**
-To evaluate your eligibility and receive personalized coverage recommendations, please upload one of our 4 accepted official documents:
 • **Government ID Proof** (Passport, Driver's License, Aadhaar, Voter ID)
 • **Recent Medical Report** (< 12 months)
-• **Income Proof** (Salary Slips, Form 16, or ITR return)
-• **Age Proof** (Birth Certificate, School Leaving Certificate, Passport)
+• **Income Proof** (min. INR 25,000/mo net — Salary Slips, Form 16, or ITR)
+• **Age Proof** (Birth Certificate, 10th Board Certificate with DOB, or Passport)
 
-CHAT_TITLE: Invalid Document Upload
+CHAT_TITLE: Non-Accepted Document Upload
 RECOMMENDED_POLICY_IDS: []`;
       } else if (isRecommendation) {
         console.log(`[policy-advisor-chat] Triggering Phase 4 Policy Recommendation path...`);
@@ -585,12 +605,14 @@ MARKDOWN & FORMATTING RULES (STRICT):
 - For bullet points, always use bullet dot (• ) or dash (- ).
 
 RECOMMENDATION RULES:
-- NON-INSURANCE / UNRELATED DOCUMENTS (CRITICAL):
-  • If the uploaded document is NOT a valid insurance verification document (e.g. restaurant menu, food bill, grocery receipt, personal photo, selfie, meme):
-  • State directly and upright that the document is a non-insurance document (e.g. "The uploaded file appears to be a restaurant food menu").
-  • NEVER evaluate or cite any specific policies (do NOT mention Health, Life, or Silver 500).
+- NON-INSURANCE / UNACCEPTED DOCUMENTS (CRITICAL):
+  • If the uploaded document is NOT an accepted insurance verification document (e.g. university marksheet, semester grade card, college transcript, diploma, degree, restaurant menu, food bill, grocery receipt, personal photo, selfie, meme):
+  • State general ineligibility directly without tying it to any specific policy:
+    "**Eligibility Verdict:** Not Eligible — The submitted document is not an accepted document for insurance verification."
+  • CRITICAL: NEVER say "You are Not Eligible for the Health policy" or mention any specific policy name (such as Health, Life, or Silver 500) unless the user explicitly requested that named policy in their message.
+  • In Suitability Assessment: Explain directly that the document (e.g. university marksheet or college transcript) is an academic record and cannot verify legal identity, age, income, or health status for insurance underwriting. Do NOT evaluate criteria for a specific policy.
   • NEVER output policy links or recommendation cards.
-  • State the 4 accepted documents and output RECOMMENDED_POLICY_IDS: []
+  • List the 4 accepted documents and output RECOMMENDED_POLICY_IDS: []
 - If the applicant is INELIGIBLE or NO policy matches:
   • You MUST output RECOMMENDED_POLICY_IDS: []
   • NEVER recommend an ineligible policy, NEVER say it is a preliminary fit, and NEVER tell them to apply for it.

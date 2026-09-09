@@ -104,6 +104,10 @@ function normalizeMarkdown(text) {
   if (!text) return '';
   let cleaned = text;
 
+  // 0. Merge orphaned bullet markers (•, -, *) followed by newline with the text on the next line
+  // e.g. "•\nThe uploaded document" -> "• The uploaded document"
+  cleaned = cleaned.replace(/(^[ \t]*[•\-*])[ \t]*\r?\n+[ \t]*([^\r\n#\-*•\d])/gm, '$1 $2');
+
   // 1. Normalize absolute internal policy links to relative paths
   cleaned = cleaned.replace(/https?:\/\/[^/]+(\/client\/policies\/[a-zA-Z0-9_-]+)/g, '$1');
 
@@ -265,10 +269,13 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
           const itemText = isBulletDot
             ? trimmed.replace(/^•\s*/, '')
             : trimmed.replace(/^[-+*]\s+/, '');
+          
+          if (!itemText.trim()) return null;
+
           return (
             <div key={idx} className="advisor-bullet-item">
-              <span className="advisor-bullet-dot">•</span>
-              <div className="advisor-bullet-content">{renderInlineFormatting(itemText)}</div>
+              <span className="advisor-bullet-dot" aria-hidden="true">•</span>
+              <span className="advisor-bullet-content">{renderInlineFormatting(itemText)}</span>
             </div>
           );
         }
@@ -281,10 +288,11 @@ function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolic
           const numText = (trimmed.startsWith('**') && !rawRest.startsWith('**'))
             ? `**${rawRest}`
             : rawRest;
+          if (!numText.trim()) return null;
           return (
             <div key={idx} className="advisor-numbered-item">
               <span className="advisor-numbered-prefix">{numPrefix}</span>
-              <div className="advisor-numbered-content">{renderInlineFormatting(numText)}</div>
+              <span className="advisor-numbered-content">{renderInlineFormatting(numText)}</span>
             </div>
           );
         }

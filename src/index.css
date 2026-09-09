@@ -3380,37 +3380,46 @@ textarea.form-control:focus {
 
 .advisor-bullet-item {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 8px;
-  margin: 4px 0;
+  margin: 5px 0;
+  line-height: 1.5;
 }
 
 .advisor-bullet-dot {
   color: var(--color-accent);
   font-weight: bold;
-  line-height: 1.4;
+  line-height: inherit;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .advisor-bullet-content {
   flex: 1;
+  line-height: inherit;
+  display: inline;
 }
 
 .advisor-numbered-item {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 6px;
-  margin: 4px 0;
+  margin: 5px 0;
+  line-height: 1.5;
 }
 
 .advisor-numbered-prefix {
   font-weight: 600;
   color: var(--color-accent);
   flex-shrink: 0;
+  line-height: inherit;
+  user-select: none;
 }
 
 .advisor-numbered-content {
   flex: 1;
+  line-height: inherit;
+  display: inline;
 }
 
 .advisor-inline-code {
