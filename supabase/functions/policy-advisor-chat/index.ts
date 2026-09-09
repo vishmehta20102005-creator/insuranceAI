@@ -538,7 +538,7 @@ ${REQUIRED_DOCUMENTS_FORMATTED}
             temperature: 0.2,
             maxOutputTokens: 8192,
             thinkingConfig: {
-              thinkingBudget: 0,
+              thinkingLevel: "low",
             },
           },
         };
@@ -598,15 +598,13 @@ CHAT_TITLE: <3 to 6 words>
             temperature: 0.2,
             maxOutputTokens: 4096,
             thinkingConfig: {
-              thinkingBudget: 0,
+              thinkingLevel: "low",
             },
           },
         };
       }
 
       const MODELS = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
         "gemini-3.6-flash",
         "gemini-3.5-flash",
       ];
