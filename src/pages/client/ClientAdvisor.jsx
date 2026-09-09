@@ -712,6 +712,18 @@ export default function ClientAdvisor() {
         setConversations(updatedConvs);
 
         if (result.messages && result.messages.length > 0) {
+          if (currentFiles.length > 0) {
+            const lastUserIdx = [...result.messages].reverse().findIndex((m) => m.role === 'user');
+            if (lastUserIdx !== -1) {
+              const actualIdx = result.messages.length - 1 - lastUserIdx;
+              if (!result.messages[actualIdx].attachments || result.messages[actualIdx].attachments.length === 0) {
+                result.messages[actualIdx].attachments = currentFiles.map((f) => ({
+                  filename: f.name,
+                  size: f.size,
+                }));
+              }
+            }
+          }
           setMessages(result.messages);
         }
       }

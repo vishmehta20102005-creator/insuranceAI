@@ -40,8 +40,8 @@ export async function sendAdvisorMessage({ conversationId = null, message = '', 
     );
 
     bodyPayload.attachments = encodedAttachments;
-    // Also include single attachment for legacy Edge Function compatibility
-    if (encodedAttachments.length === 1) {
+    // Always include first attachment as 'attachment' for fallback compatibility
+    if (encodedAttachments.length > 0) {
       bodyPayload.attachment = encodedAttachments[0];
     }
   }

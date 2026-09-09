@@ -362,9 +362,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 5. Insert User Message ─────────────────────────────────
-    const userMsgContent = message || (attachmentsList.length > 0
-      ? `[Uploaded ${attachmentsList.length} document${attachmentsList.length > 1 ? 's' : ''}: ${attachmentsList.map(a => a.filename).join(', ')}]`
-      : "");
+    let userMsgContent = message;
+    if (attachmentsList.length > 0) {
+      const docListStr = `[Uploaded ${attachmentsList.length} document${attachmentsList.length > 1 ? 's' : ''}: ${attachmentsList.map(a => a.filename).join(', ')}]`;
+      userMsgContent = message ? `${message}\n${docListStr}` : docListStr;
+    }
 
     const userStoredContent = savedAttachments.length > 0
       ? `${userMsgContent}\n<!--ATTACHMENTS:${JSON.stringify(
@@ -373,7 +375,11 @@ Deno.serve(async (req: Request) => {
             file_path: sa.file_path,
             id: sa.id,
           }))
-        )}-->`
+        )}-->\n<!--ATTACHMENT:${JSON.stringify({
+          filename: savedAttachments[0].filename,
+          file_path: savedAttachments[0].file_path,
+          id: savedAttachments[0].id,
+        })}-->`
       : userMsgContent;
 
     const { error: userMsgErr } = await adminClient.from("chat_messages").insert([
