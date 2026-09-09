@@ -3688,6 +3688,15 @@ textarea.form-control:focus {
   background: #fee2e2;
 }
 
+.advisor-form-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 820px;
+  margin: 0 auto;
+  width: 100%;
+}
+
 .advisor-attach-button {
   position: relative;
   width: 40px;
@@ -3735,6 +3744,9 @@ textarea.form-control:focus {
 
 .advisor-text-input {
   flex: 1;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
   padding: 10px 14px;
   font-family: var(--font-sans);
   font-size: 14px;
