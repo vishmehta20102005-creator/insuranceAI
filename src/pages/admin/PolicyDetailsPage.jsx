@@ -15,6 +15,8 @@ import {
   updatePolicyRequiredDocument,
   deletePolicyRequiredDocument,
   reorderPolicyRequiredDocuments,
+  fetchPolicyEmbedding,
+  triggerPolicyEmbeddingGeneration,
 } from '../../lib/policies';
 import { fetchSubmissionsForPolicyAdmin } from '../../lib/submissions';
 import ReviewSubmissionModal from '../../components/admin/ReviewSubmissionModal';
@@ -97,6 +99,11 @@ export default function PolicyDetailsPage() {
   const [deletingDocId, setDeletingDocId] = useState(null);
   const [deletingPolicy, setDeletingPolicy] = useState(false);
 
+  // Policy Embedding & AI Summary state
+  const [embeddingData, setEmbeddingData] = useState(null);
+  const [generatingEmbedding, setGeneratingEmbedding] = useState(false);
+  const [embeddingSuccess, setEmbeddingSuccess] = useState(false);
+
   useEffect(() => {
     loadPolicy();
   }, [id]);
@@ -105,16 +112,18 @@ export default function PolicyDetailsPage() {
     setLoading(true);
     setError('');
     try {
-      const [data, subsData, catsData, reqDocsData] = await Promise.all([
+      const [data, subsData, catsData, reqDocsData, embData] = await Promise.all([
         fetchPolicyById(id),
         fetchSubmissionsForPolicyAdmin(id),
         fetchPolicyCategories(),
         fetchPolicyRequiredDocuments(id),
+        fetchPolicyEmbedding(id),
       ]);
       setPolicy(data);
       setSubmissions(subsData || []);
       setCategories(catsData || []);
       setRequiredDocs(reqDocsData || []);
+      setEmbeddingData(embData);
       setName(data.name || '');
       setCategoryId(data.category_id || (catsData && catsData.length > 0 ? catsData[0].id : ''));
       setCategory(data.category || 'health');
@@ -124,6 +133,22 @@ export default function PolicyDetailsPage() {
       setError(err.message || 'Failed to load policy.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRegenerateEmbedding() {
+    setGeneratingEmbedding(true);
+    setEmbeddingSuccess(false);
+    try {
+      await triggerPolicyEmbeddingGeneration(id);
+      const updatedEmb = await fetchPolicyEmbedding(id);
+      setEmbeddingData(updatedEmb);
+      setEmbeddingSuccess(true);
+      setTimeout(() => setEmbeddingSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed generating embedding:', err);
+    } finally {
+      setGeneratingEmbedding(false);
     }
   }
 
@@ -183,6 +208,9 @@ export default function PolicyDetailsPage() {
       setPolicy((prev) => ({ ...prev, ...updated }));
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+      if (status === 'published' || updated.status === 'published') {
+        handleRegenerateEmbedding();
+      }
     } catch (err) {
       setError(err.message || 'Failed to update policy.');
     } finally {
@@ -393,8 +421,9 @@ export default function PolicyDetailsPage() {
     setUploading(false);
     setUploadProgress('');
     setStagedFiles([]);
-    // Reload policy documents
-    loadPolicy();
+    // Reload policy documents and refresh embedding
+    await loadPolicy();
+    handleRegenerateEmbedding();
   }
 
   async function handleViewDocument(filePath) {
@@ -409,12 +438,13 @@ export default function PolicyDetailsPage() {
   async function handleDeleteDocument(docId, filePath) {
     setDeletingDocId(docId);
     try {
-      await deletePolicyDocument(docId, filePath);
+      await deletePolicyDocument(docId, filePath, id);
       setPolicy((prev) => ({
         ...prev,
         documents: prev.documents.filter((d) => d.id !== docId),
       }));
       setConfirmingDocId(null);
+      handleRegenerateEmbedding();
     } catch (err) {
       alert('Failed to delete document: ' + err.message);
     } finally {
@@ -1020,6 +1050,107 @@ export default function PolicyDetailsPage() {
               ) : (
                 <div className="empty-docs-placeholder">
                   <p>No documents uploaded yet. Add policy T&Cs, eligibility rules, or exclusion lists above.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── AI Advisor Vector Embedding & Underwriting Summary Card ── */}
+          <div className="card" style={{ marginTop: '28px' }}>
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                  <h2 style={{ margin: 0 }}>AI Advisor Embedding & Underwriting Summary</h2>
+                  {embeddingData ? (
+                    <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', padding: '3px 8px' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor' }} />
+                      Vector Active (768-dim)
+                    </span>
+                  ) : (
+                    <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', padding: '3px 8px' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor' }} />
+                      Embedding Pending
+                    </span>
+                  )}
+                </div>
+                <p className="card-subtitle">
+                  Dense semantic criteria extracted by Gemini and indexed in Supabase pgvector. Used by the policy advisor to shortlist policies.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {embeddingSuccess && (
+                  <span style={{ color: 'var(--color-success, #16a34a)', fontSize: '13px', fontWeight: 500 }}>
+                    ✓ Vector embedding updated!
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRegenerateEmbedding}
+                  disabled={generatingEmbedding}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {generatingEmbedding ? (
+                    <>
+                      <span className="btn-spinner" />
+                      <span>Generating with Gemini...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                      </svg>
+                      <span>{embeddingData ? 'Regenerate Embedding' : 'Generate Embedding Now'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 20px 20px' }}>
+              {embeddingData?.summary_text ? (
+                <div style={{
+                  background: 'var(--color-surface-sunken, rgba(0,0,0,0.02))',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '8px',
+                  padding: '16px 18px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)' }}>
+                      Dense Underwriting Criteria Summary
+                    </span>
+                    {embeddingData.updated_at && (
+                      <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        Last synced: {new Date(embeddingData.updated_at).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.6, color: 'var(--color-text-normal)' }}>
+                    {embeddingData.summary_text}
+                  </p>
+                </div>
+              ) : (
+                <div style={{
+                  padding: '28px 20px',
+                  textAlign: 'center',
+                  background: 'var(--color-surface-sunken, rgba(0,0,0,0.02))',
+                  borderRadius: '8px',
+                  border: '1px dashed var(--color-border)',
+                }}>
+                  <div style={{ fontSize: '28px', marginBottom: '8px' }}>⚡</div>
+                  <h4 style={{ margin: '0 0 6px' }}>No Vector Embedding Generated Yet</h4>
+                  <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', maxWidth: '520px', margin: '0 auto 16px' }}>
+                    Upload policy terms or eligibility documents above, or click "Generate Embedding Now" to prompt Gemini to analyze eligibility criteria and store the vector embedding in Supabase pgvector.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleRegenerateEmbedding}
+                    disabled={generatingEmbedding}
+                    className="btn btn-primary btn-sm"
+                  >
+                    {generatingEmbedding ? 'Analyzing & Embedding...' : 'Generate Embedding Now'}
+                  </button>
                 </div>
               )}
             </div>

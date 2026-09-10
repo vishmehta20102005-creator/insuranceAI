@@ -163,6 +163,24 @@ export async function triggerPolicyEmbeddingGeneration(policyId) {
 }
 
 /**
+ * Fetch the vector embedding and summary record for a policy.
+ */
+export async function fetchPolicyEmbedding(policyId) {
+  if (!policyId) return null;
+  const { data, error } = await supabase
+    .from('policy_embeddings')
+    .select('id, policy_id, summary_text, updated_at')
+    .eq('policy_id', policyId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('Error fetching policy embedding:', error);
+    return null;
+  }
+  return data;
+}
+
+/**
  * Create a new policy.
  */
 export async function createPolicy({ name, description, category_id, category, status, created_by }) {

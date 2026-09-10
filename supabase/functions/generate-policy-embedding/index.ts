@@ -169,12 +169,18 @@ CRITICAL REQUIREMENTS:
 
     const summaryParts = [...inlineParts, { text: promptText }];
 
-    const MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+    const MODELS = [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
     let summaryText = "";
+    const debugLogs = [];
 
     for (const model of MODELS) {
       try {
-        console.log(`[generate-policy-embedding] Calling ${model} to generate summary...`);
+        debugLogs.push(`Calling ${model}...`);
         const genUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
         const genRes = await fetch(genUrl, {
           method: "POST",
@@ -183,31 +189,43 @@ CRITICAL REQUIREMENTS:
             contents: [{ parts: summaryParts }],
             generationConfig: {
               temperature: 0.2,
-              maxOutputTokens: 500,
+              maxOutputTokens: 2048,
+              thinkingConfig: {
+                thinkingLevel: "low",
+              },
             },
           }),
         });
 
         if (genRes.ok) {
           const genData = await genRes.json();
-          summaryText = genData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+          const candidateParts = genData?.candidates?.[0]?.content?.parts || [];
+          let extractedText = "";
+          for (const part of candidateParts) {
+            if (part.text && !part.thought) {
+              extractedText += part.text;
+            }
+          }
+          summaryText = extractedText.trim();
           if (summaryText) {
-            console.log(`[generate-policy-embedding] ✓ Successfully generated summary with ${model}`);
+            debugLogs.push(`✓ Success with ${model}`);
             break;
+          } else {
+            debugLogs.push(`${model} returned empty parts: ${JSON.stringify(genData)}`);
           }
         } else {
           const errText = await genRes.text();
-          console.warn(`[generate-policy-embedding] ${model} returned HTTP ${genRes.status}: ${errText}`);
+          debugLogs.push(`${model} HTTP ${genRes.status}: ${errText}`);
         }
-      } catch (genErr) {
-        console.warn(`[generate-policy-embedding] Error with ${model}:`, genErr);
+      } catch (genErr: any) {
+        debugLogs.push(`${model} Exception: ${genErr?.message || String(genErr)}`);
       }
     }
 
     // Fallback if Gemini generation failed
     if (!summaryText) {
       summaryText = `${policy.name} is a ${categoryName} insurance policy. ${policy.description || ""}. Provides comprehensive insurance coverage subject to verified applicant identity, proof of income, and standard underwriting guidelines.`.trim();
-      console.log("[generate-policy-embedding] Used fallback summary text");
+      debugLogs.push("Used fallback summary text");
     }
 
     console.log(`[generate-policy-embedding] Summary text: "${summaryText.slice(0, 120)}..."`);
@@ -302,6 +320,7 @@ CRITICAL REQUIREMENTS:
         summary_text: summaryText,
         dimensions: embeddingVector.length,
         updated_at: upsertData.updated_at,
+        debug_log: debugLogs,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
