@@ -555,20 +555,20 @@ Return JSON ONLY:
       if (isInvalidDocument) {
         console.log(`[policy-advisor-chat] Returning upfront rejection for invalid document(s): ${invalidDocType}`);
         assistantReply = `**Eligibility Verdict:**
-Not Eligible — The submitted document${attachmentsList.length > 1 ? 's are' : ' is'} not accepted for insurance verification.
+Not Eligible — The submitted document${attachmentsList.length > 1 ? 's are' : ' is'} incompatible and not accepted for insurance verification.
 
 **Suitability Assessment:**
-• The uploaded document${attachmentsList.length > 1 ? 's appear' : ' appears'} to be **${invalidDocType}**, which cannot be used to verify your identity, age, income, or medical status for insurance underwriting.
-• Academic documents (such as university marksheets or college transcripts) do not satisfy underwriting requirements for age, income, or health verification.
+• The uploaded document${attachmentsList.length > 1 ? 's appear' : ' appears'} to be **${invalidDocType}**, which is strictly incompatible with insurance document requirements (such as authentic Aadhaar Card, Vehicle RC, or Medical Diagnostic Reports).
+• Academic documents (such as university marksheets or college transcripts), utility receipts, or casual media do not satisfy underwriting requirements for identity, age, income, or health verification.
 • We cannot evaluate or issue an insurance policy based on ${attachmentsList.length > 1 ? 'these documents' : 'this document'}.
-• Please upload the required verification documents listed below.
+• Please upload the genuine, authentic required documents listed below.
 
 **Required Documents:**
-• **Government ID Proof** (Passport, Driver's License, Aadhaar, Voter ID)
-• **Income Proof** (Salary Slips, Form 16, or ITR)
-• **Policy-Specific Documents** (Medical Report for Health, Vehicle RC & Driving License for Motor/Car, Property Deed for Home)
+• **Government ID Proof** (Authentic Aadhaar Card with UIDAI credentials, Passport, Driver's License, Voter ID, PAN Card)
+• **Income Proof** (Official Salary Slips, Form 16, or ITR)
+• **Policy-Specific Documents** (Diagnostic Medical Report for Health, Vehicle RC & Driving License for Motor/Car, Property Deed for Home)
 
-CHAT_TITLE: Non-Accepted Document Upload
+CHAT_TITLE: Incompatible Document Upload
 RECOMMENDED_POLICY_IDS: []`;
       } else if (isRecommendation) {
         console.log(`[policy-advisor-chat] Triggering Phase 4 Policy Recommendation path...`);
@@ -765,7 +765,7 @@ RECOMMENDED_POLICY_IDS: []`;
           for (let i = 0; i < attachmentsList.length; i++) {
             const att = attachmentsList[i];
             currentTurnParts.push({
-              text: `=== APPLICANT'S UPLOADED DOCUMENT ${i + 1} of ${attachmentsList.length}: "${att.filename}" ===`,
+              text: `=== APPLICANT'S UPLOADED DOCUMENT ${i + 1} of ${attachmentsList.length}: "${att.filename}" ===\nDocument Compatibility & Authenticity Task: Inspect this document's visual and textual content to detect its genuine document type (e.g. Real Aadhaar Card, PAN Card, Vehicle RC, Diagnostic Medical Report, Utility Bill, Marksheet, etc.). Verify whether it is genuinely compatible with the specific required document types for candidate policies.`,
             });
             currentTurnParts.push({
               inline_data: {
@@ -777,7 +777,7 @@ RECOMMENDED_POLICY_IDS: []`;
         }
 
         currentTurnParts.push({
-          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits.\n     - Income Proof: Verified net monthly income against policy minimum.\n     - Medical Report: Verified health status and absence of exclusion conditions.\n     - Vehicle / Motor Docs: Verified vehicle registration, ownership, and driving license validity.\n     - Property / Home Docs: Verified property ownership or address proof.\n     - Unaccepted documents (marksheet, bill, menu): State that academic records or receipts cannot verify age/income/health for insurance.\n     - Hard rule violation: State the exact document and criterion that caused disqualification (e.g. "Age 65 exceeds maximum limit of 60 years").\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING for the recommended policy: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s) required for that policy! (Check the "Required Documents" list configured for the policy in the catalog above. Never re-request documents that were already verified).\n   • If ALL required documents for the policy are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible or uploaded only unaccepted documents: Label as **Required Documents:** and list the documents required for that policy category.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE: If the applicant violates any hard rule, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy. Suggest contacting support for senior/specialized options instead.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
+          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated or incompatible document>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified or if incompatible:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits with authentic Aadhaar / Govt ID.\n     - Income Proof: Verified net monthly income against policy minimum with authentic salary slip/ITR.\n     - Medical Report: Verified health status and absence of exclusion conditions with authentic diagnostic report.\n     - Vehicle / Motor Docs: Verified vehicle registration, ownership, and driving license validity with authentic RC.\n     - Property / Home Docs: Verified property ownership or address proof.\n     - Incompatible document: State that the detected document (e.g. marksheet, utility bill, selfie) is incompatible with the policy's required document (e.g. Aadhaar Card, RC).\n     - Hard rule violation: State the exact document and criterion that caused disqualification.\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING for the recommended policy: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s) required for that policy! (Check the "Required Documents" list configured for the policy in the catalog above. Never re-request documents that were already verified).\n   • If ALL required documents for the policy are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible, uploaded incompatible documents, or uploaded unaccepted documents: Label as **Required Documents:** and list the genuine documents required for that policy category.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE OR INCOMPATIBLE: If the applicant violates any hard rule or uploaded incompatible documents for a required slot, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
         });
 
         // Build multi-turn history excluding the current turn (since we provide currentTurnParts)
@@ -814,26 +814,43 @@ Keep responses short, clear, and readable (under 140 words). Use exactly 3 short
 
 1. **Eligibility Verdict**: 1 direct sentence:
    • Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."
-   • Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated>" (or general if unaccepted document).
+   • Ineligible / Incompatible: "Not Eligible for <Policy Name> — <Specific rule violated or incompatible document>."
    • Partial match (valid document(s) uploaded, but some required documents still missing): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."
 
 2. **Suitability & Document Verification**:
    • For each uploaded document, concisely state what it verifies:
-     - Identity & Age: Verified name, DOB, and age against policy limits (e.g. 18–60).
-     - Income Proof: Verified net monthly income against policy minimum (e.g. INR 25,000/mo).
-     - Medical Report: Verified health status and absence of exclusion conditions.
-     - Vehicle / Motor Docs: Verified vehicle registration details, ownership, driving license validity.
+     - Identity & Age: Verified name, DOB, and age against policy limits (e.g. 18–60) via authentic Aadhaar / Government ID.
+     - Income Proof: Verified net monthly income against policy minimum (e.g. INR 25,000/mo) via authentic salary slips/ITR.
+     - Medical Report: Verified health status and absence of exclusion conditions via authentic clinical report.
+     - Vehicle / Motor Docs: Verified vehicle registration details, ownership, driving license validity via authentic RC.
      - Property / Home Docs: Verified property ownership or address proof.
-     - Unaccepted documents (marksheet, bill, menu): State that academic records or bills cannot verify age/income/health.
-     - Hard rule violation: State the exact document and criterion that caused disqualification (e.g. "Age 65 exceeds maximum limit of 60 years. No published policies match this profile.").
+     - Incompatible / Unaccepted documents: State that the detected document (e.g. marksheet, utility bill, casual photo) is NOT compatible with the required document (e.g. Aadhaar Card, RC) and cannot be accepted.
+     - Hard rule violation: State the exact document and criterion that caused disqualification.
 
 3. **Required Documents / Next Steps**:
    • If applicant uploaded documents and SOME ARE MISSING for the recommended policy:
      Label as **Remaining Documents Needed:** and list ONLY the remaining document(s) required for that policy that haven't been provided yet! (Reference the specific "Required Documents" configured for that policy in the catalog. Never re-request documents that the applicant already successfully submitted).
-   • If NO documents were uploaded yet, or all uploaded documents were unaccepted:
-     Label as **Required Documents:** and list the documents required for that policy category (e.g. for Health: Government ID, Medical Report, Income Proof; for Motor: Vehicle RC, Driving License, Government ID).
+   • If NO documents were uploaded yet, or all uploaded documents were unaccepted/incompatible:
+     Label as **Required Documents:** and list the genuine documents required for that policy category (e.g. for Health: Government ID / Aadhaar Card, Medical Report, Income Proof; for Motor: Vehicle RC, Driving License, Government ID).
    • If ALL required documents for the policy are verified and applicant is eligible:
      Instruct them to proceed to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
+
+DOCUMENT COMPATIBILITY & REAL AUTHENTICITY ENFORCEMENT (MANDATORY):
+• For each uploaded document, determine its actual document type and verify its genuine hallmarks:
+  - Real Aadhaar Card: Must have genuine UIDAI hallmarks (12-digit Aadhaar number format [XXXX XXXX XXXX or masked], Government of India / Unique Identification Authority of India headers, national emblem, QR code, photo). An electricity bill, utility receipt, college marksheet, or random receipt is NOT an Aadhaar card and cannot satisfy the Aadhaar/ID requirement.
+  - Real Government ID: Must be an official government photo ID (Aadhaar, PAN Card with Income Tax Department header, Passport, Voter ID, Driver's License).
+  - Real Vehicle RC: Must be an official Vehicle Registration Certificate issued by an RTO/transport authority with vehicle registration number, chassis/engine numbers, owner name, vehicle class. Casual vehicle photos, fuel receipts, or driver's license alone are NOT Vehicle RCs.
+  - Real Medical Diagnostic Report: Must be an authentic pathology laboratory or hospital clinical report with test metrics (blood panel, sugar, vitals) and lab/physician credentials. Handwritten notes or pharmacy bills are NOT medical reports.
+  - Real Income Proof: Must be employer salary slips, Form 16, ITR acknowledgment, or formal bank statements.
+• COMPARE AGAINST CANDIDATE POLICY REQUIRED DOCUMENTS:
+  - Check the configured "Required Documents" for each candidate policy in the catalog above.
+  - If the policy requires an Aadhaar Card / Government ID, the uploaded document MUST be an authentic Aadhaar Card or government photo ID. If the applicant uploaded an electricity bill, college marksheet, or car photo, it is INCOMPATIBLE.
+  - If the policy requires a Vehicle RC, the uploaded document MUST be an authentic Vehicle RC. If the applicant uploaded a selfie, car photo, or Aadhaar alone, it does NOT satisfy the Vehicle RC requirement.
+  - If the uploaded document is INCOMPATIBLE with the candidate policy's requirements:
+    • In **Eligibility Verdict**: State: "Not Eligible for <Policy Name> — Uploaded document (<detected document type>) is incompatible with the required document (<expected document, e.g. authentic Aadhaar Card / Vehicle RC>)."
+    • In **Suitability & Document Verification**: State: "• Document Incompatibility: Uploaded file '<filename>' was detected as a <detected document type>, which does NOT satisfy the requirement for an authentic <expected document>. A genuine, official <expected document> is required for underwriting."
+    • Output RECOMMENDED_POLICY_IDS: [] (do NOT recommend or link to the policy until compatible authentic documents are provided).
+    • In **Remaining Documents Needed:** or **Required Documents:**, list the authentic document that must be submitted.
 
 MARKDOWN & FORMATTING RULES (STRICT):
 - Always use standard double asterisks for bold labels like **Eligibility Verdict:**, **Suitability & Document Verification:**, **Remaining Documents Needed:**, **Required Documents:**.
@@ -849,8 +866,8 @@ RECOMMENDATION RULES:
   • CRITICAL: NEVER say "You are Not Eligible for the Health policy" or mention any specific policy name (such as Health, Life, or Silver 500) unless the user explicitly requested that named policy in their message.
   • In Suitability Assessment: Explain directly that the document (e.g. university marksheet or college transcript) is an academic record and cannot verify legal identity, age, income, or health status for insurance underwriting. Do NOT evaluate criteria for a specific policy.
   • NEVER output policy links or recommendation cards.
-  • List the 4 accepted documents and output RECOMMENDED_POLICY_IDS: []
-- If the applicant is INELIGIBLE or NO policy matches:
+  • List the accepted documents and output RECOMMENDED_POLICY_IDS: []
+- If the applicant is INELIGIBLE or uploaded INCOMPATIBLE documents:
   • You MUST output RECOMMENDED_POLICY_IDS: []
   • NEVER recommend an ineligible policy, NEVER say it is a preliminary fit, and NEVER tell them to apply for it.
   • Suggest contacting support for custom senior citizen plans instead.
@@ -919,6 +936,7 @@ CONCISE & FAST RESPONSES (STRICT REQUIREMENT):
 
 INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
 • When asked about required documents or platform rules, clarify that InsuranceAI supports policy-specific document requirements (e.g. Health policies require Medical Reports, ID, and Income; Car/Motor policies require Vehicle RC and Driving License). Each policy's exact required checklist is displayed on its application page.
+• STRICT DOCUMENT COMPATIBILITY: If asked about substituting documents (e.g. using an electricity bill or marksheet instead of Aadhaar, or a photo instead of Vehicle RC), inform the applicant that documents must be genuine and strictly compatible with the requirement. If a policy requires Aadhaar Card, only a genuine UIDAI Aadhaar Card or official government photo ID is accepted. Incompatible documents will fail verification.
 
 CONVERSATION SIDEBAR TITLE (MANDATORY):
 • At the end of your response, on its own line, append:

@@ -12,23 +12,50 @@ const SYSTEM_PROMPT = `You are an expert insurance eligibility analyst. Your job
 
 INSTRUCTIONS:
 1. Read ALL policy documents thoroughly. Identify EVERY eligibility rule, requirement, condition, exclusion, age limit, income threshold, waiting period, geographic restriction, and any other criterion mentioned.
-2. Read the "MANDATORY APPLICATION DOCUMENTS CONFIGURED FOR THIS POLICY" list. The policy specifies exactly which document types the applicant is required to submit (e.g. Government ID, Medical Report, Income Proof, Vehicle RC, Driving License, Address Proof, Property Deed, etc.).
+2. Read the "MANDATORY APPLICATION DOCUMENTS CONFIGURED FOR THIS POLICY" list. The policy specifies exactly which document types the applicant is required to submit (e.g. Government ID / Aadhaar Card, Recent Medical Report, Income Proof, Vehicle RC, Driving License, Address Proof, Property Deed, etc.).
 3. Read ALL client documents thoroughly. Extract all relevant personal and verification information (name, age, DOB, income, medical history, vehicle details, address, ID numbers, etc.).
-4. Check EACH policy rule and EACH mandatory document type against the client's documents.
-   - For every required document type, determine whether the client uploaded an authentic, valid document matching that requirement.
-   - If a mandatory required document type is missing, corrupted, or fails authenticity, record a rule check with status "violated" and severity "blocking".
-   - For every eligibility rule, determine whether the client satisfies it, violates it, or if the evidence is unclear.
-5. Return your analysis as ONLY a valid JSON object — no markdown, no prose, no code fences, no explanation outside the JSON.
+4. STRICT DOCUMENT COMPATIBILITY & AUTHENTICITY VALIDATION (MANDATORY):
+   For EACH client document submitted, you must verify both its AUTHENTICITY and its COMPATIBILITY with the required document slot it was uploaded for:
+   - Aadhaar Card / Government Photo ID (e.g. slot "id_proof" or "age_proof"):
+     • Must be a real, authentic government-issued identity document.
+     • For Aadhaar: Must have authentic UIDAI characteristics (e.g. Unique Identification Authority of India / Government of India header, national emblem, 12-digit Aadhaar number format [XXXX XXXX XXXX or masked], name, DOB/Year of Birth, gender, address, QR code, or official UIDAI layout).
+     • Other accepted Government IDs: PAN Card (Income Tax Department header, 10-character alphanumeric PAN), Passport, Voter ID (Election Commission of India), or official Driving License.
+     • STRICTLY INCOMPATIBLE DOCUMENTS: An electricity bill, utility receipt, college marksheet, semester grade card, university degree/diploma, student ID, generic certificate, resume, invoice, selfie, or random photo uploaded in the Aadhaar / ID slot is STRICTLY INCOMPATIBLE.
+   - Vehicle Registration Certificate (RC) (e.g. slot "vehicle_rc"):
+     • Must be an authentic Vehicle Registration Certificate issued by a state transport department / RTO (showing Vehicle Registration Number, Chassis Number, Engine Number, Owner Name, Vehicle Class/Model, Fuel Type, Registration Date).
+     • STRICTLY INCOMPATIBLE DOCUMENTS: A driving license alone, a PUC slip alone, an insurance receipt alone, or a photo of a car/bike without an official registration certificate is STRICTLY INCOMPATIBLE.
+   - Recent Medical Diagnostic Report (e.g. slot "medical_report"):
+     • Must be an authentic laboratory / hospital diagnostic test report or clinical health examination report with patient details, lab/hospital header, test date, and clinical parameters (e.g. blood panel, HbA1c, lipid profile, vitals, doctor/pathologist sign-off).
+     • STRICTLY INCOMPATIBLE DOCUMENTS: A handwritten prescription note with no diagnostic lab results, pharmacy cash memo, medical store bill, gym card, or unrelated paper is STRICTLY INCOMPATIBLE.
+   - Income Proof (e.g. slot "income_proof"):
+     • Must be authentic employer salary slips (with earnings/deductions breakdown and employer details), Form 16, official Income Tax Return (ITR-V acknowledgment), or official bank account statement.
+     • STRICTLY INCOMPATIBLE DOCUMENTS: Informal notes, business visiting cards, student cards, or random receipts are STRICTLY INCOMPATIBLE.
+   - Age Proof (e.g. slot "age_proof"):
+     • Must be an authentic Government ID showing explicit Date of Birth, official Birth Certificate, or 10th Class Board passing certificate stating DOB.
+     • STRICTLY INCOMPATIBLE DOCUMENTS: College marksheets without DOB, utility bills, or random receipts are STRICTLY INCOMPATIBLE.
+
+   MANDATORY ACTION ON DOCUMENT MISMATCH / INCOMPATIBILITY:
+   • If ANY uploaded document is incompatible with its required slot (e.g. applicant uploaded an electricity bill or college marksheet for the Aadhaar slot, or a photo for the Vehicle RC slot):
+     - Record a rule check in "reasons":
+       "rule_checked": "Document Compatibility & Authenticity: <Required Document Label>"
+       "policy_source": "Mandatory Application Documents Configuration"
+       "status": "violated"
+       "severity": "blocking"
+       "client_evidence": "Document Incompatibility: The file submitted for '<Required Document Label>' ('<filename>') was detected as a <detected document type, e.g. College Marksheet / Electricity Bill / Random Photo> and is NOT a genuine, authentic <Required Document Label>."
+     - Because this rule check has severity "blocking", the overall "verdict" MUST be "not_eligible".
+
+5. For every eligibility rule in the policy, determine whether the client satisfies it, violates it, or if the evidence is unclear.
+6. Return your analysis as ONLY a valid JSON object — no markdown, no prose, no code fences, no explanation outside the JSON.
 
 IMPORTANT RULES:
 - List EVERY rule and document requirement you checked in the "reasons" array, not just failures. This must be fully auditable.
-- If a rule is clearly violated or a mandatory document type is missing/unaccepted, mark status as "violated" and severity as "blocking".
+- If a rule is clearly violated or a mandatory document type is missing/incompatible/inauthentic, mark status as "violated" and severity as "blocking".
 - If a rule has a minor concern but isn't a hard disqualifier, mark status as "violated" and severity as "warning".
-- If a rule or document requirement is satisfied, mark status as "satisfied" with severity as null.
+- If a rule or document requirement is satisfied with an authentic matching document, mark status as "satisfied" with severity as null.
 - If you can't determine whether a rule is satisfied from the provided documents, mark status as "unclear" and severity as "warning".
-- If ANY rule has severity "blocking", the verdict MUST be "not_eligible".
+- If ANY rule or document requirement has severity "blocking", the verdict MUST be "not_eligible".
 - If no rules are "blocking" but some are "unclear" or "warning", the verdict should be "needs_review".
-- Only if ALL rules and required documents are "satisfied" should the verdict be "eligible".
+- Only if ALL rules and required documents are authentically "satisfied" should the verdict be "eligible".
 - confidence_score should reflect how confident you are in the overall assessment (0-100).
 
 REQUIRED JSON OUTPUT FORMAT (return ONLY this, nothing else):
@@ -277,7 +304,7 @@ export default {
 
         // Add a text label before client documents
         parts.push({
-          text: "\n=== CLIENT DOCUMENTS (applicant's personal documents to verify) ===",
+          text: "\n=== CLIENT DOCUMENTS (applicant's personal documents submitted for verification) ===",
         });
 
         for (const doc of clientDocs ?? []) {
@@ -294,8 +321,12 @@ export default {
             );
           }
 
+          // Match with required document configuration
+          const matchingReqDoc = effectiveRequiredDocs.find((rd) => rd.document_type === doc.document_type);
+          const slotLabel = matchingReqDoc ? matchingReqDoc.label : (doc.document_type || "Mandatory Document");
+
           parts.push({
-            text: `[Client Document: "${doc.filename}" — type: ${doc.document_type}]`,
+            text: `[Client Document: "${doc.filename}" submitted for mandatory slot: "${slotLabel}" (document_type key: "${doc.document_type}")]\nVerification Requirement: Verify that this document is an authentic, genuine ${slotLabel} and strictly compatible with this slot. If it is an incompatible file (e.g. utility bill or marksheet for Aadhaar, or photo for Vehicle RC), record a blocking violation.`,
           });
 
           const base64 = await blobToBase64(fileData);
@@ -307,9 +338,19 @@ export default {
           });
         }
 
+        // Check for any mandatory required document slots where the applicant did NOT upload a file
+        for (const reqDoc of effectiveRequiredDocs) {
+          const hasUploaded = (clientDocs ?? []).some((cd) => cd.document_type === reqDoc.document_type);
+          if (!hasUploaded) {
+            parts.push({
+              text: `[MISSING MANDATORY DOCUMENT ALERT]: The applicant did NOT upload any document for required slot "${reqDoc.label}" (key: "${reqDoc.document_type}"). This mandatory requirement is missing and MUST be recorded as a rule check with status "violated" and severity "blocking".`,
+            });
+          }
+        }
+
         // Add the final instruction
         parts.push({
-          text: "\n=== TASK ===\nAnalyze the policy documents above and check the client's documents against every eligibility rule. Return ONLY valid JSON in the exact format specified in your instructions. Do not include any text outside the JSON.",
+          text: "\n=== TASK ===\nAnalyze the policy documents and check the client's documents against every eligibility rule and mandatory document requirement. Enforce strict document compatibility and authenticity. Return ONLY valid JSON in the exact format specified in your instructions. Do not include any text outside the JSON.",
         });
 
         // ── 6. Call Gemini (Fast direct call with single fallback) ──
@@ -456,6 +497,16 @@ export default {
           );
         } else {
           eligibilityResult.confidence_score = null;
+        }
+
+        // Deterministic safeguard: If ANY reason has status "violated" and severity "blocking",
+        // the verdict MUST be "not_eligible".
+        const hasBlockingViolation = eligibilityResult.reasons?.some(
+          (r: any) => r.status === "violated" && r.severity === "blocking"
+        );
+        if (hasBlockingViolation && eligibilityResult.verdict !== "not_eligible") {
+          console.warn("[check-eligibility] Overriding verdict to 'not_eligible' due to blocking violation in reasons");
+          eligibilityResult.verdict = "not_eligible";
         }
 
         console.log(
