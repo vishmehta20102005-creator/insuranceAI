@@ -372,13 +372,23 @@ export default function ClientSubmissions() {
                             })}
                           </td>
 
-                          <td style={{ textAlign: 'right' }}>
-                            <Link
-                              to={`/client/policies/${sub.policy_id}`}
-                              className={`btn btn-sm ${canReapply ? 'btn-primary' : 'btn-ghost'}`}
-                            >
-                              {canReapply ? 'Reapply' : 'View Details'}
-                            </Link>
+                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+                              <Link
+                                to={`/client/submissions/${sub.id}`}
+                                className="btn btn-sm btn-ghost"
+                              >
+                                View Details
+                              </Link>
+                              {canReapply && (
+                                <Link
+                                  to={`/client/policies/${sub.policy_id}`}
+                                  className="btn btn-sm btn-primary"
+                                >
+                                  Reapply
+                                </Link>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

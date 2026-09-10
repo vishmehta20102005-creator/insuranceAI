@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import {
   REQUIRED_DOC_TYPES,
   fetchLatestSubmissionForPolicy,
+  fetchSubmissionById,
   createSubmission,
   uploadSubmissionDocument,
   getSubmissionDocumentSignedUrl,
@@ -56,6 +57,8 @@ function SubmissionStatusBadge({ status }) {
 
 export default function ClientPolicyDetail() {
   const { id: policyId } = useParams();
+  const [searchParams] = useSearchParams();
+  const querySubmissionId = searchParams.get('submissionId');
   const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
 
@@ -142,8 +145,18 @@ export default function ClientPolicyDetail() {
           setRequiredDocs([]);
         }
 
-        // Check for the most recent submission by this client for this policy
-        const existing = await fetchLatestSubmissionForPolicy(policyId, user.id);
+        // Check for specific requested submission or the most recent submission by this client
+        let existing = null;
+        if (querySubmissionId) {
+          try {
+            existing = await fetchSubmissionById(querySubmissionId, user.id);
+          } catch (fetchErr) {
+            console.warn('Could not load specific submissionId, falling back to latest:', fetchErr);
+          }
+        }
+        if (!existing) {
+          existing = await fetchLatestSubmissionForPolicy(policyId, user.id);
+        }
         setSubmission(existing);
       } catch (err) {
         setPageError(err.message || 'Failed to load policy.');
@@ -151,7 +164,7 @@ export default function ClientPolicyDetail() {
         setPageLoading(false);
       }
     })();
-  }, [policyId, user]);
+  }, [policyId, querySubmissionId, user]);
 
   // ── auto-poll if submission is currently processing in background
   useEffect(() => {

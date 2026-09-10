@@ -49,7 +49,7 @@ export async function fetchLatestSubmissionForPolicy(policyId, clientId) {
     .from('client_submissions')
     .select(`
       *,
-      submission_documents ( id, document_type, filename, file_size, uploaded_at )
+      submission_documents ( id, document_type, filename, file_size, file_path, uploaded_at )
     `)
     .eq('policy_id', policyId)
     .eq('client_id', clientId)
@@ -63,6 +63,63 @@ export async function fetchLatestSubmissionForPolicy(policyId, clientId) {
   }
 
   return data; // null if none
+}
+
+/**
+ * Fetch a specific submission by its ID, along with policy details and
+ * uploaded documents.
+ */
+export async function fetchSubmissionById(submissionId, clientId = null) {
+  let query = supabase
+    .from('client_submissions')
+    .select(`
+      *,
+      policies (
+        id,
+        name,
+        category,
+        category_id,
+        description,
+        status,
+        policy_categories ( id, name, description )
+      ),
+      submission_documents ( id, document_type, filename, file_size, file_path, uploaded_at )
+    `)
+    .eq('id', submissionId);
+
+  if (clientId) {
+    query = query.eq('client_id', clientId);
+  }
+
+  const { data, error } = await query.single();
+  if (error) {
+    console.error('Error fetching submission by ID:', error);
+    throw error;
+  }
+
+  return {
+    ...data,
+    policy: data.policies,
+  };
+}
+
+/**
+ * Fetch all submissions by a client for a policy (to detect subsequent approved submissions).
+ */
+export async function fetchAllSubmissionsForPolicyByClient(policyId, clientId) {
+  const { data, error } = await supabase
+    .from('client_submissions')
+    .select('id, policy_id, client_id, status, submitted_at')
+    .eq('policy_id', policyId)
+    .eq('client_id', clientId)
+    .order('submitted_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching submissions for policy by client:', error);
+    return [];
+  }
+
+  return data || [];
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
