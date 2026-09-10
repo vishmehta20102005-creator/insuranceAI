@@ -158,31 +158,19 @@ function normalizeMarkdown(text) {
  * Policy recommendation cards are rendered STRICTLY from recommendedPolicyIds.
  */
 function FormattedAssistantMessage({ content, policiesMap = {}, recommendedPolicyIds = [] }) {
-  // Check if the response states the applicant is ineligible or disqualified
+  // Check if the response states the applicant is ineligible, disqualified, or the category is unoffered
   const contentLower = (content || '').toLowerCase();
-  const isIneligible =
-    /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit|not a recognized insurance|invalid document|restaurant.*menu|unrelated document/i.test(
+  const isIneligibleOrUnoffered =
+    /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit|not a recognized insurance|invalid document|restaurant.*menu|unrelated document|do not offer|does not offer|not offered|not available|not currently offer|don't offer|dont offer|no live policies|not currently have|no matching policy/i.test(
       contentLower
     );
 
-  let uniqueIds = (!isIneligible && Array.isArray(recommendedPolicyIds))
+  // Policy recommendation cards are strictly rendered ONLY when recommendedPolicyIds is explicitly provided by the backend and applicant is eligible
+  const uniqueIds = (!isIneligibleOrUnoffered && Array.isArray(recommendedPolicyIds))
     ? Array.from(new Set(recommendedPolicyIds))
     : [];
 
-  // Fallback: If recommendedPolicyIds is empty but applicant is eligible, infer matching policy from text
-  if (uniqueIds.length === 0 && !isIneligible) {
-    for (const [polId, pol] of Object.entries(policiesMap)) {
-      if (
-        contentLower.includes(pol.name.toLowerCase()) ||
-        content.includes(polId.substring(0, 16))
-      ) {
-        uniqueIds.push(polId);
-        break;
-      }
-    }
-  }
-
-  // Policy recommendation cards are strictly rendered ONLY when the applicant is eligible and policies are recommended
+  // Policy recommendation cards are strictly rendered ONLY when policies are officially recommended
   const policyCards = [];
   for (const policyId of uniqueIds) {
     const policyObj = policiesMap[policyId];
