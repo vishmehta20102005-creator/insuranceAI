@@ -217,102 +217,128 @@ export default function ClientCurrentPolicies() {
 
         {/* Stats Grid */}
         <div className="stats-grid" style={{ marginBottom: '32px' }}>
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <span className="stat-card-title">Active Policies</span>
-              <div className="stat-card-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className="card stat-card">
+            <div className="stat-card-inner">
+              <div>
+                <span className="stat-label">Active Policies</span>
+                <div className="stat-value" style={{ color: 'var(--color-success, #16a34a)' }}>
+                  {approvedPolicies.length}
+                </div>
+              </div>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(22, 163, 74, 0.1)', color: 'var(--color-success, #16a34a)' }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
               </div>
             </div>
-            <div className="stat-card-value" style={{ color: '#16a34a' }}>
-              {approvedPolicies.length}
-            </div>
-            <div className="stat-card-subtitle">
+            <div className="stat-note">
               {approvedPolicies.length === 1 ? '1 policy fully active' : `${approvedPolicies.length} policies fully active`}
             </div>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <span className="stat-card-title">Coverage Status</span>
-              <div className="stat-card-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className="card stat-card">
+            <div className="stat-card-inner">
+              <div>
+                <span className="stat-label">Coverage Status</span>
+                <div className="stat-value" style={{ color: '#15803d', fontSize: '1.25rem' }}>
+                  {approvedPolicies.length > 0 ? 'Active & Covered' : 'No Active Policies'}
+                </div>
+              </div>
+              <div className="stat-icon-wrapper" style={{ background: 'rgba(22, 163, 74, 0.1)', color: '#15803d' }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
             </div>
-            <div className="stat-card-value" style={{ color: '#15803d', fontSize: '1.4rem' }}>
-              {approvedPolicies.length > 0 ? 'Active & Covered' : 'No Active Policies'}
-            </div>
-            <div className="stat-card-subtitle">
+            <div className="stat-note">
               {approvedPolicies.length > 0 ? 'Underwriting approval confirmed' : 'Submit an application to activate'}
             </div>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <span className="stat-card-title">Categories Covered</span>
-              <div className="stat-card-icon" style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-accent)' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className="card stat-card">
+            <div className="stat-card-inner">
+              <div>
+                <span className="stat-label">Categories Covered</span>
+                <div className="stat-value">
+                  {uniqueCategoriesCount}
+                </div>
+              </div>
+              <div className="stat-icon-wrapper" style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-accent)' }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <path d="M3 9h18" />
                 </svg>
               </div>
             </div>
-            <div className="stat-card-value">
-              {uniqueCategoriesCount}
-            </div>
-            <div className="stat-card-subtitle">
+            <div className="stat-note">
               {uniqueCategoriesCount === 1 ? '1 insurance category' : `${uniqueCategoriesCount} insurance categories`}
             </div>
           </div>
 
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <span className="stat-card-title">Verified Documents</span>
-              <div className="stat-card-icon" style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-secondary)' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className="card stat-card">
+            <div className="stat-card-inner">
+              <div>
+                <span className="stat-label">Verified Documents</span>
+                <div className="stat-value">
+                  {totalVerifiedDocs}
+                </div>
+              </div>
+              <div className="stat-icon-wrapper" style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-secondary)' }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <polyline points="14 2 14 8 20 8" />
                 </svg>
               </div>
             </div>
-            <div className="stat-card-value">
-              {totalVerifiedDocs}
-            </div>
-            <div className="stat-card-subtitle">
+            <div className="stat-note">
               Underwriting verified files
             </div>
           </div>
         </div>
 
-        {/* Filters & Search */}
+        {/* Filters & Search Toolbar */}
         {approvedPolicies.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`btn btn-sm ${selectedCategory === cat ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ textTransform: 'capitalize' }}
-                >
-                  {cat === 'all' ? 'All Active Policies' : cat}
-                </button>
-              ))}
+          <div className="table-toolbar" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+            <div className="filter-tabs">
+              {categories.map((cat) => {
+                const count = cat === 'all'
+                  ? approvedPolicies.length
+                  : approvedPolicies.filter((p) => (p.policy?.policy_categories?.name || p.policy?.category) === cat).length;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`filter-tab ${selectedCategory === cat ? 'active' : ''}`}
+                    style={{ textTransform: 'capitalize' }}
+                  >
+                    {cat === 'all' ? `All Active (${count})` : `${cat} (${count})`}
+                  </button>
+                );
+              })}
             </div>
 
-            <div style={{ minWidth: '240px' }}>
+            <div className="search-bar-container" style={{ maxWidth: '320px', flex: '1 1 260px' }}>
+              <svg className="search-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
               <input
                 type="text"
-                className="input"
                 placeholder="Search active policies..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ width: '100%' }}
+                className="search-input-with-icon"
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="search-clear-btn"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
             </div>
           </div>
         )}
