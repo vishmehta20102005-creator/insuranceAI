@@ -463,7 +463,7 @@ function renderItalicAndCode(text) {
 }
 
 export default function ClientAdvisor() {
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
