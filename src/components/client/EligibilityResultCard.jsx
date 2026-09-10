@@ -45,6 +45,7 @@ export default function EligibilityResultCard({
   policy,
   canResubmit,
   isRetrying,
+  isSupersededByApproved,
   onRetryEligibility,
   onScrollToResubmit,
   onViewDoc,
@@ -165,22 +166,54 @@ export default function EligibilityResultCard({
         </svg>
       ),
     },
-    needs_review: {
-      themeClass: 'verdict-banner-needs-review',
-      title: 'Your application needs manual review',
-      subtitle: 'Some information in your documents requires further verification. An insurance administrator will review your application and follow up.',
-      iconBg: '#fef3c7',
-      iconColor: '#d97706',
-      badgeClass: 'sub-badge-needs_review',
-      badgeText: '⚠ Needs Review',
-      icon: (
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-      ),
-    },
+    needs_review: isSupersededByApproved
+      ? {
+          themeClass: 'verdict-banner-eligible',
+          title: 'Previous Application — Resolved',
+          subtitle: 'A subsequent application for this policy was approved. Your active policy coverage is in effect.',
+          iconBg: '#dcfce7',
+          iconColor: '#16a34a',
+          badgeClass: 'sub-badge-approved',
+          badgeText: '✓ Resolved (Approved)',
+          icon: (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+          ),
+        }
+      : issues.length === 0 && unclear.length === 0
+      ? {
+          themeClass: 'verdict-banner-needs-review',
+          title: 'Pending Underwriter Sign-off',
+          subtitle: 'Preliminary AI screening passed with all requirements met. Application is queued for standard underwriter sign-off.',
+          iconBg: '#fef3c7',
+          iconColor: '#d97706',
+          badgeClass: 'sub-badge-needs_review',
+          badgeText: '⏳ In Review',
+          icon: (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          ),
+        }
+      : {
+          themeClass: 'verdict-banner-needs-review',
+          title: 'Your application needs manual review',
+          subtitle: 'Some information in your documents requires further verification by an underwriting specialist.',
+          iconBg: '#fef3c7',
+          iconColor: '#d97706',
+          badgeClass: 'sub-badge-needs_review',
+          badgeText: '⚠ Needs Review',
+          icon: (
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          ),
+        },
   }[currentStatus] ?? {
     themeClass: 'verdict-banner-neutral',
     title: 'Application Assessment',
@@ -328,7 +361,11 @@ export default function EligibilityResultCard({
                     <polyline points="10 9 9 9 8 9" />
                   </svg>
                   <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                    AI Assessment Summary
+                    {isSupersededByApproved
+                      ? 'AI Document Pre-Screening (Historical Record)'
+                      : currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0
+                      ? 'AI Document Pre-Screening: Criteria Met'
+                      : 'AI Assessment Summary'}
                   </h3>
                 </div>
                 <div className="eligibility-meta-tags">
@@ -356,6 +393,18 @@ export default function EligibilityResultCard({
                 <p className="eligibility-summary-text">
                   {renderFormattedText(result.summary)}
                 </p>
+              )}
+
+              {isSupersededByApproved && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontSize: '0.85rem', fontWeight: 500, marginTop: '8px' }}>
+                  <span>✓ Preliminary criteria were verified by AI. Application resolved by approved subsequent submission.</span>
+                </div>
+              )}
+
+              {!isSupersededByApproved && currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#d97706', fontSize: '0.85rem', fontWeight: 500, marginTop: '8px' }}>
+                  <span>⏳ Automated pre-screening passed. Final policy issuance is pending standard underwriter sign-off.</span>
+                </div>
               )}
 
               {onRetryEligibility && (result?.confidence_score === 0 || reasons.length === 0) && (
@@ -565,50 +614,6 @@ export default function EligibilityResultCard({
                     {satisfied.map((r, idx) => (
                       <ReasonItem key={`satisfied-${idx}`} reason={r} type="satisfied" />
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Status notice when under manual underwriting review without blocking issues */}
-              {currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0 && (
-                <div
-                  style={{
-                    padding: '20px 24px',
-                    background: 'rgba(217, 119, 6, 0.06)',
-                    border: '1px solid rgba(217, 119, 6, 0.2)',
-                    borderRadius: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '14px',
-                    margin: '12px 0 20px',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '50%',
-                      background: '#fef3c7',
-                      color: '#d97706',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '1.1rem',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <polyline points="12 6 12 12 16 14" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 600, color: 'var(--color-text)', fontSize: '0.95rem' }}>
-                      Underwriting Review In Progress
-                    </div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                      Your application and submitted documents are undergoing manual underwriting assessment. An insurance administrator will verify your file and notify you once the decision is finalized.
-                    </div>
                   </div>
                 </div>
               )}

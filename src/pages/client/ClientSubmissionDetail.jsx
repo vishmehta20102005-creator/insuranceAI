@@ -392,6 +392,7 @@ export default function ClientSubmissionDetail() {
             result={eligibilityResult}
             policy={policy}
             canResubmit={canReapply}
+            isSupersededByApproved={isSupersededByApproved}
             onViewDoc={handleViewDoc}
             viewingDocId={viewingDocId}
             onScrollToResubmit={() => {
