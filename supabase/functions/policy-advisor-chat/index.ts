@@ -64,6 +64,50 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 }
 
 /**
+ * Phase 5b: Generate 768-dimensional vector embedding for client query text.
+ */
+async function generateQueryEmbedding(text: string, apiKey: string): Promise<number[] | null> {
+  function normalizeVector(vec: number[]): number[] {
+    const norm = Math.sqrt(vec.reduce((sum: number, val: number) => sum + val * val, 0));
+    if (norm === 0) return vec;
+    return vec.map((val: number) => val / norm);
+  }
+
+  const EMBED_MODELS = ["gemini-embedding-001", "embedding-001"];
+  for (const model of EMBED_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: `models/${model}`,
+          content: {
+            parts: [{ text }],
+          },
+          outputDimensionality: 768,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const rawVector = data?.embedding?.values;
+        if (Array.isArray(rawVector) && rawVector.length > 0) {
+          const targetVec = rawVector.length > 768 ? rawVector.slice(0, 768) : rawVector;
+          return normalizeVector(targetVec);
+        }
+      } else {
+        const errText = await res.text();
+        console.warn(`[generateQueryEmbedding] ${model} HTTP ${res.status}: ${errText}`);
+      }
+    } catch (err) {
+      console.warn(`[generateQueryEmbedding] Error calling ${model}:`, err);
+    }
+  }
+  return null;
+}
+
+/**
  * Determine if message indicates an explicit fresh policy recommendation request.
  * Only triggers the heavy multimodal path when:
  * (a) a new file is attached to this specific message, OR
@@ -575,13 +619,82 @@ RECOMMENDED_POLICY_IDS: []`;
           policyReqDocsMap[rd.policy_id].push(rd);
         }
 
+        // ── Phase 5b: Embedding-based Policy Candidate Narrowing ──
+        let situationText = userMsgContent || "";
+        if (attachmentsList.length > 0) {
+          const docInfo = attachmentsList.map((a: any) => a.filename).join(", ");
+          situationText += `\nApplicant uploaded verification documents: ${invalidDocType || "Insurance verification files"} (${docInfo})`;
+        } else if (situationText.trim().length < 30 && convHistory && convHistory.length > 0) {
+          const recentUserContext = convHistory
+            .filter((m: any) => m.role === "user")
+            .slice(-2)
+            .map((m: any) => m.content)
+            .join(" ");
+          if (recentUserContext) {
+            situationText = `${recentUserContext}\n${situationText}`;
+          }
+        }
+
+        console.log(`[policy-advisor-chat] Phase 5b: Generating query embedding for situation: "${situationText.slice(0, 100)}..."`);
+        const queryEmbedding = await generateQueryEmbedding(situationText, GEMINI_API_KEY);
+
+        let candidatePolicies = publishedPolicies;
+        let skippedPolicies: any[] = [];
+        const matchedPoliciesMap: Record<string, number> = {};
+
+        if (queryEmbedding && publishedPolicies.length > 0) {
+          console.log(`[policy-advisor-chat] Phase 5b: Running pgvector match_policies search...`);
+          const { data: matchedRows, error: matchError } = await adminClient
+            .rpc("match_policies", {
+              query_embedding: queryEmbedding,
+              match_count: 5,
+            });
+
+          if (matchError) {
+            console.warn("[policy-advisor-chat] Phase 5b: match_policies error:", matchError);
+          } else if (Array.isArray(matchedRows) && matchedRows.length > 0) {
+            for (const row of matchedRows) {
+              matchedPoliciesMap[row.policy_id] = row.similarity;
+            }
+
+            console.log(
+              `[policy-advisor-chat] Phase 5b pgvector matches:`,
+              matchedRows.map((r: any) => `${r.policy_id} (sim: ${(r.similarity * 100).toFixed(1)}%)`)
+            );
+
+            const shortlistedIds = new Set(matchedRows.map((r: any) => r.policy_id));
+            const matchedCandidates = publishedPolicies.filter((p: any) => shortlistedIds.has(p.id));
+
+            // Sort candidate policies by descending similarity score
+            matchedCandidates.sort((a: any, b: any) => (matchedPoliciesMap[b.id] || 0) - (matchedPoliciesMap[a.id] || 0));
+
+            if (matchedCandidates.length > 0) {
+              candidatePolicies = matchedCandidates;
+            }
+          }
+        }
+
+        // Limit candidate policies to top 5
+        if (candidatePolicies.length > 5) {
+          candidatePolicies = candidatePolicies.slice(0, 5);
+        }
+
+        const candidatePolicyIds = new Set(candidatePolicies.map((p: any) => p.id));
+        skippedPolicies = publishedPolicies.filter((p: any) => !candidatePolicyIds.has(p.id));
+
+        console.log(`[policy-advisor-chat] Phase 5b Narrowing Results:`);
+        console.log(`  • Total Published Policies: ${publishedPolicies.length}`);
+        console.log(`  • Candidate Policies Sent for Detailed Multimodal PDF Reasoning: ${candidatePolicies.length} (${candidatePolicies.map((p: any) => `"${p.name}"`).join(", ")})`);
+        console.log(`  • Policies Skipped (Full PDFs not downloaded): ${skippedPolicies.length} (${skippedPolicies.map((p: any) => `"${p.name}"`).join(", ")})`);
+
         // Build current turn parts
         const currentTurnParts: any[] = [];
 
         // Add Catalog Summary with direct markdown links and required documents
-        let catalogText = "=== OFFICIAL PUBLISHED POLICIES CATALOG ===\n";
-        for (const p of publishedPolicies) {
+        let catalogText = "=== CANDIDATE POLICIES SHORTLISTED VIA SEMANTIC VECTOR SIMILARITY ===\n";
+        for (const p of candidatePolicies) {
           const categoryName = p.policy_categories?.name || p.category || "General Insurance";
+          const simScore = matchedPoliciesMap[p.id] != null ? ` (Vector Similarity: ${(matchedPoliciesMap[p.id] * 100).toFixed(1)}%)` : "";
           const reqDocs = policyReqDocsMap[p.id] || [
             { document_type: "id_proof", label: "Government ID Proof" },
             { document_type: "medical_report", label: "Recent Medical Report" },
@@ -590,18 +703,30 @@ RECOMMENDED_POLICY_IDS: []`;
           ];
           const reqDocsStr = reqDocs.map((rd: any) => rd.label).join(", ");
 
-          catalogText += `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${categoryName}\n  Description: ${p.description || "N/A"}\n  Required Documents: ${reqDocsStr}\n  Direct Link: [Apply for ${p.name}](/client/policies/${p.id})\n\n`;
+          catalogText += `• Candidate Policy: "${p.name}" (ID: ${p.id})${simScore}\n  Category: ${categoryName}\n  Description: ${p.description || "N/A"}\n  Required Documents: ${reqDocsStr}\n  Direct Link: [Apply for ${p.name}](/client/policies/${p.id})\n\n`;
+        }
+
+        if (skippedPolicies.length > 0) {
+          catalogText += "=== OTHER PUBLISHED POLICIES IN CATALOG (Skipped from full PDF attachments to optimize context) ===\n";
+          for (const sp of skippedPolicies) {
+            const cat = sp.policy_categories?.name || sp.category || "General Insurance";
+            catalogText += `• "${sp.name}" (Category: ${cat}, ID: ${sp.id})\n`;
+          }
+          catalogText += "\n";
         }
         currentTurnParts.push({ text: catalogText });
 
         // Map policy IDs to names for labeling
         const policyNameMap = Object.fromEntries(
-          publishedPolicies.map((p) => [p.id, p.name])
+          publishedPolicies.map((p: any) => [p.id, p.name])
         );
 
-        // Download and attach official policy PDFs concurrently
+        // Download and attach official policy PDFs ONLY for candidate policies
+        const candidatePolicyDocList = pubPolicyDocs.filter((doc: any) => candidatePolicyIds.has(doc.policy_id));
+        console.log(`[policy-advisor-chat] Downloading PDFs for ${candidatePolicies.length} candidate policies (${candidatePolicyDocList.length} documents total)...`);
+
         const downloadedDocs = await Promise.all(
-          pubPolicyDocs.map(async (doc) => {
+          candidatePolicyDocList.map(async (doc) => {
             try {
               const { data: fileBlob, error: dlErr } = await adminClient.storage
                 .from("policy-documents")
