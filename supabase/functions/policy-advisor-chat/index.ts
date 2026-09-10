@@ -874,6 +874,10 @@ DOCUMENT COMPATIBILITY & REAL AUTHENTICITY ENFORCEMENT (MANDATORY):
     • In **Suitability & Document Verification**: State: "• Document Incompatibility: Uploaded file '<filename>' was detected as a <detected document type>, which does NOT satisfy the requirement for an authentic <expected document>. A genuine, official <expected document> is required for underwriting."
     • Output RECOMMENDED_POLICY_IDS: [] (do NOT recommend or link to the policy until compatible authentic documents are provided).
     • In **Remaining Documents Needed:** or **Required Documents:**, list the authentic document that must be submitted.
+• DEMO / SYNTHETIC / SAMPLE WATERMARKS:
+  - If ANY uploaded document displays labels, headers, or watermarks such as "DEMO", "SYNTHETIC", "SAMPLE", "SPECIMEN", "NOT VALID", "NOT A VALID DRIVING LICENCE", or "NOT ISSUED BY ANY GOVERNMENT AUTHORITY":
+    • In **Eligibility Verdict**: State: "Preliminary Fit (Manual Review Required) for <Policy Name> — The uploaded documents contain a 'DEMO / SYNTHETIC' watermark and require human underwriter verification of genuine originals before final approval."
+    • In **Suitability & Document Verification**: Note that the document's structured details match policy criteria, but flag that the document is labeled as a synthetic/demo sample. Official original credentials are required for formal policy issuance.
 
 MARKDOWN & FORMATTING RULES (STRICT):
 - Always use standard double asterisks for bold labels like **Eligibility Verdict:**, **Suitability & Document Verification:**, **Remaining Documents Needed:**, **Required Documents:**.

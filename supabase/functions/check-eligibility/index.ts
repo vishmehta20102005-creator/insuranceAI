@@ -34,6 +34,13 @@ INSTRUCTIONS:
      • Must be an authentic Government ID showing explicit Date of Birth, official Birth Certificate, or 10th Class Board passing certificate stating DOB.
      • STRICTLY INCOMPATIBLE DOCUMENTS: College marksheets without DOB, utility bills, or random receipts are STRICTLY INCOMPATIBLE.
 
+   - DEMO / SYNTHETIC / SPECIMEN / SAMPLE WATERMARKS:
+     • If ANY uploaded document displays labels, headers, footers, or watermarks such as "DEMO", "SYNTHETIC", "SAMPLE", "SPECIMEN", "NOT VALID", "NOT A VALID DRIVING LICENCE", "NOT ISSUED BY ANY GOVERNMENT AUTHORITY", or "TESTING":
+       - The document MUST NOT be approved as a clean production credential!
+       - For each such document, set status: "unclear" (or "violated") and severity: "warning".
+       - In client_evidence, explicitly state: "Document contains '<Watermark/disclaimer text>'. Requires manual administrative review to confirm genuine official credentials."
+       - Because of this warning, the overall verdict MUST be "needs_review" (NOT "eligible").
+
    MANDATORY ACTION ON DOCUMENT MISMATCH / INCOMPATIBILITY:
    • If ANY uploaded document is incompatible with its required slot (e.g. applicant uploaded an electricity bill or college marksheet for the Aadhaar slot, or a photo for the Vehicle RC slot):
      - Record a rule check in "reasons":
@@ -507,6 +514,21 @@ export default {
         if (hasBlockingViolation && eligibilityResult.verdict !== "not_eligible") {
           console.warn("[check-eligibility] Overriding verdict to 'not_eligible' due to blocking violation in reasons");
           eligibilityResult.verdict = "not_eligible";
+        }
+
+        // Deterministic safeguard 2: If ANY reason has severity "warning" or status "unclear",
+        // or explicitly mentions demo/synthetic/specimen watermark, the verdict CANNOT be "eligible".
+        // It must be "needs_review".
+        const hasWarningOrDemo = eligibilityResult.reasons?.some(
+          (r: any) =>
+            r.severity === "warning" ||
+            r.status === "unclear" ||
+            /demo|synthetic|specimen|sample|not valid|not issued|watermark/i.test(r.client_evidence || "") ||
+            /demo|synthetic|specimen|sample|not valid|not issued|watermark/i.test(r.rule_checked || "")
+        );
+        if (hasWarningOrDemo && eligibilityResult.verdict === "eligible") {
+          console.warn("[check-eligibility] Overriding verdict to 'needs_review' due to warning or demo/synthetic document flag");
+          eligibilityResult.verdict = "needs_review";
         }
 
         console.log(
