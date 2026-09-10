@@ -462,6 +462,41 @@ Deno.serve(async (req: Request) => {
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
 
+      // ── Fetch all currently published policies with categories (Ground truth for entire turn) ──
+      const { data: pubPolicies } = await adminClient
+        .from("policies")
+        .select(`
+          id,
+          name,
+          description,
+          category,
+          category_id,
+          policy_categories (
+            id,
+            name,
+            description
+          )
+        `)
+        .eq("status", "published");
+      publishedPolicies = pubPolicies || [];
+
+      const liveCategories = Array.from(
+        new Set(
+          publishedPolicies.map(
+            (p: any) => p.policy_categories?.name || p.category || "General Insurance"
+          )
+        )
+      );
+
+      const liveCatalogSummary = publishedPolicies.length > 0
+        ? publishedPolicies
+            .map((p: any) => {
+              const cat = p.policy_categories?.name || p.category || "General Insurance";
+              return `• "${p.name}" (Category: ${cat}) — ${p.description || "Active published policy"}`;
+            })
+            .join("\n")
+        : "No policies currently published.";
+
       let geminiPayload: any;
       let isInvalidDocument = false;
       let invalidDocType = "";
@@ -572,24 +607,6 @@ CHAT_TITLE: Incompatible Document Upload
 RECOMMENDED_POLICY_IDS: []`;
       } else if (isRecommendation) {
         console.log(`[policy-advisor-chat] Triggering Phase 4 Policy Recommendation path...`);
-
-        // Fetch all published policies with categories
-        const { data: pubPolicies } = await adminClient
-          .from("policies")
-          .select(`
-            id,
-            name,
-            description,
-            category,
-            category_id,
-            policy_categories (
-              id,
-              name,
-              description
-            )
-          `)
-          .eq("status", "published");
-        publishedPolicies = pubPolicies || [];
 
         const pubPolicyIds = publishedPolicies.map((p) => p.id);
         let pubPolicyDocs: any[] = [];
@@ -871,6 +888,12 @@ RECOMMENDATION RULES:
   • You MUST output RECOMMENDED_POLICY_IDS: []
   • NEVER recommend an ineligible policy, NEVER say it is a preliminary fit, and NEVER tell them to apply for it.
   • Suggest contacting support for custom senior citizen plans instead.
+- UNAVAILABLE POLICY CATEGORIES (ZERO HALLUCINATIONS):
+  • If the applicant asks about or requests a policy category that is NOT in our live published catalog (for example, Life Insurance, Travel Insurance, etc.):
+    - Set Eligibility Verdict: "**Eligibility Verdict:** Not Available — InsuranceAI does not currently offer [Requested Category, e.g. Life Insurance] policies."
+    - In Suitability & Document Verification: State clearly that our live published catalog currently offers only ${liveCategories.join(", ")}, and that Life Insurance (or the requested category) is not currently live or offered.
+    - Set RECOMMENDED_POLICY_IDS: []
+    - NEVER recommend an irrelevant policy (e.g. NEVER recommend Health or Car when the applicant asks for Life insurance).
 - If the applicant IS FULLY ELIGIBLE:
   • Output RECOMMENDED_POLICY_IDS: [<uuid>]
   • Include the link: "To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
@@ -929,10 +952,24 @@ CONCISE & FAST RESPONSES (STRICT REQUIREMENT):
   - Explain each term in 1-2 plain-language sentences with a quick everyday example.
   - Conclude with a 1-sentence bottom line comparing them.
   - Total length should be 3-5 sentences maximum.
-• For follow-up questions about a previous decision or guidance:
+• For follow-up questions or policy inquiries:
   - Answer directly and conversationally in 1-3 sentences.
 • Never output raw markdown hashtags (#, ##) and never output code fences.
 • Always use standard double asterisks for bold labels like **Deductible:** or **Copay:**. Never use single asterisks (*) around titles or bold words, and never output dangling asterisks (like *Term:* or Term*).
+
+LIVE POLICY CATALOG GROUND TRUTH (STRICT - ZERO HALLUCINATIONS):
+The ONLY policies currently live and published on InsuranceAI are:
+${liveCatalogSummary}
+Currently Live Categories: ${liveCategories.length > 0 ? liveCategories.join(", ") : "None"}
+
+CRITICAL RULE ON POLICY AVAILABILITY:
+• If the applicant asks whether InsuranceAI has or offers a specific policy type or category (e.g. "you have life insurance?", "do you have car insurance?", "what policies do you offer?", "do you have travel insurance?"):
+  - ONLY confirm availability if that category/policy is explicitly in the live list above!
+  - If they ask about a category or policy that is NOT live (such as Life Insurance, Travel Insurance, Home Insurance, etc.):
+    - Clearly and directly state: "We currently do not offer [Category Name, e.g. Life Insurance] policies on InsuranceAI."
+    - Explicitly state which categories ARE currently live: "${liveCategories.join(", ")}".
+    - NEVER claim, promise, or hallucinate that InsuranceAI offers a policy or category that is not in the live published list above!
+• For live policies (e.g. Car Insurance or Health Insurance): Confirm that we offer it and state what is needed to apply.
 
 INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
 • When asked about required documents or platform rules, clarify that InsuranceAI supports policy-specific document requirements (e.g. Health policies require Medical Reports, ID, and Income; Car/Motor policies require Vehicle RC and Driving License). Each policy's exact required checklist is displayed on its application page.
