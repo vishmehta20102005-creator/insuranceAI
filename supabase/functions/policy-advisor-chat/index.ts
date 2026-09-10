@@ -444,18 +444,20 @@ Deno.serve(async (req: Request) => {
             text: `You are an intake document classifier for InsuranceAI.
 Evaluate these ${attachmentsList.length} uploaded document(s) against insurance underwriting standards.
 
-ACCEPTED INSURANCE APPLICATION DOCUMENTS (ONLY THESE):
+ACCEPT INSURANCE APPLICATION DOCUMENTS:
 1. Government Photo ID (Passport, Driver's License, Aadhaar, Voter ID, PAN Card)
 2. Age Proof (Birth Certificate, 10th Class Board Passing Certificate with explicit Date of Birth, Passport)
-3. Income Proof (Official Salary Slips from employer, Form 16, ITR / Income Tax Return)
+3. Income Proof (Official Salary Slips from employer, Form 16, ITR / Income Tax Return, Bank Statements)
 4. Medical / Health Diagnostic Report (< 12 months, hospital or pathology lab report)
-5. Existing Insurance Policy Document
+5. Motor / Vehicle Documents (Vehicle Registration Certificate / RC, Driving License, Vehicle Fitness / Inspection Certificate, PUC)
+6. Property / Home Documents (Property Deed, Title Deed, Lease / Rental Agreement, Property Tax Receipt, Utility Bill for address verification)
+7. Existing Insurance Policy Document
 
 NOT ACCEPTED / INVALID / UNRELATED DOCUMENTS:
 - Academic records: University / College Marksheets, Semester Grade Cards, Academic Transcripts, Degrees, Diplomas, Course Completion Certificates, Student IDs, Homework (academic marksheets do NOT verify age, income, or medical eligibility for insurance underwriting)
-- Receipts & bills: Restaurant menus, food delivery receipts, grocery bills, retail invoices, utility bills
-- Personal media: Personal selfies, pet photos, vehicle photos, landscape photos, memes, wallpapers
-- Generic documents: Resumes, CVs, letters, random notes, contracts unrelated to insurance
+- Receipts & personal bills: Restaurant menus, food delivery receipts, grocery bills, retail shopping invoices
+- Personal media: Casual photos of selfies, pets, casual vehicle / car photos (without official registration or inspection documents), memes, wallpapers
+- Generic documents: Resumes, CVs, random notes, non-insurance commercial contracts
 
 Determine if ALL uploaded documents are invalid/unaccepted for insurance verification.
 If at least one valid insurance document is present, set "all_documents_invalid": false.
@@ -519,39 +521,76 @@ Not Eligible — The submitted document${attachmentsList.length > 1 ? 's are' : 
 
 **Required Documents:**
 • **Government ID Proof** (Passport, Driver's License, Aadhaar, Voter ID)
-• **Recent Medical Report** (< 12 months)
-• **Income Proof** (min. INR 25,000/mo net — Salary Slips, Form 16, or ITR)
-• **Age Proof** (Birth Certificate, 10th Board Certificate with DOB, or Passport)
+• **Income Proof** (Salary Slips, Form 16, or ITR)
+• **Policy-Specific Documents** (Medical Report for Health, Vehicle RC & Driving License for Motor/Car, Property Deed for Home)
 
 CHAT_TITLE: Non-Accepted Document Upload
 RECOMMENDED_POLICY_IDS: []`;
       } else if (isRecommendation) {
         console.log(`[policy-advisor-chat] Triggering Phase 4 Policy Recommendation path...`);
 
-        // Fetch all published policies
+        // Fetch all published policies with categories
         const { data: pubPolicies } = await adminClient
           .from("policies")
-          .select("id, name, description, category")
+          .select(`
+            id,
+            name,
+            description,
+            category,
+            category_id,
+            policy_categories (
+              id,
+              name,
+              description
+            )
+          `)
           .eq("status", "published");
         publishedPolicies = pubPolicies || [];
 
         const pubPolicyIds = publishedPolicies.map((p) => p.id);
         let pubPolicyDocs: any[] = [];
+        let pubPolicyReqDocs: any[] = [];
         if (pubPolicyIds.length > 0) {
-          const { data: pDocs } = await adminClient
-            .from("policy_documents")
-            .select("id, policy_id, filename, file_path, document_type")
-            .in("policy_id", pubPolicyIds);
-          pubPolicyDocs = pDocs || [];
+          const [pDocsRes, rDocsRes] = await Promise.all([
+            adminClient
+              .from("policy_documents")
+              .select("id, policy_id, filename, file_path, document_type")
+              .in("policy_id", pubPolicyIds),
+            adminClient
+              .from("policy_required_documents")
+              .select("id, policy_id, document_type, label, display_order")
+              .in("policy_id", pubPolicyIds)
+              .order("display_order", { ascending: true }),
+          ]);
+          pubPolicyDocs = pDocsRes.data || [];
+          pubPolicyReqDocs = rDocsRes.data || [];
+        }
+
+        // Map policy required documents by policy_id
+        const policyReqDocsMap: Record<string, any[]> = {};
+        for (const rd of pubPolicyReqDocs) {
+          if (!policyReqDocsMap[rd.policy_id]) {
+            policyReqDocsMap[rd.policy_id] = [];
+          }
+          policyReqDocsMap[rd.policy_id].push(rd);
         }
 
         // Build current turn parts
         const currentTurnParts: any[] = [];
 
-        // Add Catalog Summary with direct markdown links
+        // Add Catalog Summary with direct markdown links and required documents
         let catalogText = "=== OFFICIAL PUBLISHED POLICIES CATALOG ===\n";
         for (const p of publishedPolicies) {
-          catalogText += `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${p.category}\n  Description: ${p.description || "N/A"}\n  Direct Link: [Apply for ${p.name}](/client/policies/${p.id})\n\n`;
+          const categoryName = p.policy_categories?.name || p.category || "General Insurance";
+          const reqDocs = policyReqDocsMap[p.id] || [
+            { document_type: "id_proof", label: "Government ID Proof" },
+            { document_type: "medical_report", label: "Recent Medical Report" },
+            { document_type: "income_proof", label: "Income Proof" },
+            { document_type: "age_proof", label: "Age Proof" },
+          ];
+          const reqDocsStr = reqDocs.map((rd: any) => rd.label).join(", ");
+
+          catalogText += `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${categoryName}\n  Description: ${p.description || "N/A"}\n  Required Documents: ${reqDocsStr}\n  Direct Link: [Apply for ${p.name}](/client/policies/${p.id})\n\n`;
         }
         currentTurnParts.push({ text: catalogText });
 
@@ -613,7 +652,7 @@ RECOMMENDED_POLICY_IDS: []`;
         }
 
         currentTurnParts.push({
-          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of 4> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits.\n     - Income Proof: Verified net monthly income against policy minimum.\n     - Medical Report: Verified health status and absence of exclusion conditions.\n     - Unaccepted documents (marksheet, bill, menu): State that academic records or receipts cannot verify age/income/health for insurance.\n     - Hard rule violation: State the exact document and criterion that caused disqualification (e.g. "Age 65 exceeds maximum limit of 60 years").\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s)! (Never re-request documents that were already verified).\n   • If ALL 4 documents are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All 4 requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible or uploaded only unaccepted documents: Label as **Required Documents:** and list the 4 accepted types.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE: If the applicant violates any hard rule, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy. Suggest contacting support for senior/specialized options instead.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
+          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits.\n     - Income Proof: Verified net monthly income against policy minimum.\n     - Medical Report: Verified health status and absence of exclusion conditions.\n     - Vehicle / Motor Docs: Verified vehicle registration, ownership, and driving license validity.\n     - Property / Home Docs: Verified property ownership or address proof.\n     - Unaccepted documents (marksheet, bill, menu): State that academic records or receipts cannot verify age/income/health for insurance.\n     - Hard rule violation: State the exact document and criterion that caused disqualification (e.g. "Age 65 exceeds maximum limit of 60 years").\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING for the recommended policy: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s) required for that policy! (Check the "Required Documents" list configured for the policy in the catalog above. Never re-request documents that were already verified).\n   • If ALL required documents for the policy are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible or uploaded only unaccepted documents: Label as **Required Documents:** and list the documents required for that policy category.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE: If the applicant violates any hard rule, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy. Suggest contacting support for senior/specialized options instead.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
         });
 
         // Build multi-turn history excluding the current turn (since we provide currentTurnParts)
@@ -651,27 +690,25 @@ Keep responses short, clear, and readable (under 140 words). Use exactly 3 short
 1. **Eligibility Verdict**: 1 direct sentence:
    • Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."
    • Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated>" (or general if unaccepted document).
-   • Partial match (valid document(s) uploaded, but some required documents still missing): "Preliminary Fit for <Policy Name> — <X of 4> requirements verified. Pending remaining documents."
+   • Partial match (valid document(s) uploaded, but some required documents still missing): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."
 
 2. **Suitability & Document Verification**:
    • For each uploaded document, concisely state what it verifies:
      - Identity & Age: Verified name, DOB, and age against policy limits (e.g. 18–60).
      - Income Proof: Verified net monthly income against policy minimum (e.g. INR 25,000/mo).
      - Medical Report: Verified health status and absence of exclusion conditions.
+     - Vehicle / Motor Docs: Verified vehicle registration details, ownership, driving license validity.
+     - Property / Home Docs: Verified property ownership or address proof.
      - Unaccepted documents (marksheet, bill, menu): State that academic records or bills cannot verify age/income/health.
      - Hard rule violation: State the exact document and criterion that caused disqualification (e.g. "Age 65 exceeds maximum limit of 60 years. No published policies match this profile.").
 
 3. **Required Documents / Next Steps**:
-   • If applicant uploaded documents and SOME ARE MISSING:
-     Label as **Remaining Documents Needed:** and list ONLY the remaining document(s) that haven't been provided yet! (Never re-request documents that the applicant already successfully submitted).
+   • If applicant uploaded documents and SOME ARE MISSING for the recommended policy:
+     Label as **Remaining Documents Needed:** and list ONLY the remaining document(s) required for that policy that haven't been provided yet! (Reference the specific "Required Documents" configured for that policy in the catalog. Never re-request documents that the applicant already successfully submitted).
    • If NO documents were uploaded yet, or all uploaded documents were unaccepted:
-     Label as **Required Documents:** and list the 4 accepted types:
-     • Government ID Proof
-     • Recent Medical Report (< 12 months)
-     • Income Proof (min. INR 25,000/mo net)
-     • Age Proof
-   • If ALL 4 documents are verified and applicant is eligible:
-     Instruct them to proceed to apply: "All 4 requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
+     Label as **Required Documents:** and list the documents required for that policy category (e.g. for Health: Government ID, Medical Report, Income Proof; for Motor: Vehicle RC, Driving License, Government ID).
+   • If ALL required documents for the policy are verified and applicant is eligible:
+     Instruct them to proceed to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
 
 MARKDOWN & FORMATTING RULES (STRICT):
 - Always use standard double asterisks for bold labels like **Eligibility Verdict:**, **Suitability & Document Verification:**, **Remaining Documents Needed:**, **Required Documents:**.
@@ -756,7 +793,7 @@ CONCISE & FAST RESPONSES (STRICT REQUIREMENT):
 • Always use standard double asterisks for bold labels like **Deductible:** or **Copay:**. Never use single asterisks (*) around titles or bold words, and never output dangling asterisks (like *Term:* or Term*).
 
 INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
-• When asked about required documents or platform rules, reflect InsuranceAI requirements (${REQUIRED_DOCUMENT_TYPES.length} document types: ${REQUIRED_DOCUMENT_TYPES.map(d => d.label).join(', ')}). No address proof is needed.
+• When asked about required documents or platform rules, clarify that InsuranceAI supports policy-specific document requirements (e.g. Health policies require Medical Reports, ID, and Income; Car/Motor policies require Vehicle RC and Driving License). Each policy's exact required checklist is displayed on its application page.
 
 CONVERSATION SIDEBAR TITLE (MANDATORY):
 • At the end of your response, on its own line, append:

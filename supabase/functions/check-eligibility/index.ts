@@ -12,19 +12,23 @@ const SYSTEM_PROMPT = `You are an expert insurance eligibility analyst. Your job
 
 INSTRUCTIONS:
 1. Read ALL policy documents thoroughly. Identify EVERY eligibility rule, requirement, condition, exclusion, age limit, income threshold, waiting period, geographic restriction, and any other criterion mentioned.
-2. Read ALL client documents thoroughly. Extract all relevant personal information (name, age, DOB, income, medical history, address, ID details, etc.).
-3. Check EACH policy rule against the client's documents. For every rule you identify, determine whether the client satisfies it, violates it, or if the evidence is unclear.
-4. Return your analysis as ONLY a valid JSON object — no markdown, no prose, no code fences, no explanation outside the JSON.
+2. Read the "MANDATORY APPLICATION DOCUMENTS CONFIGURED FOR THIS POLICY" list. The policy specifies exactly which document types the applicant is required to submit (e.g. Government ID, Medical Report, Income Proof, Vehicle RC, Driving License, Address Proof, Property Deed, etc.).
+3. Read ALL client documents thoroughly. Extract all relevant personal and verification information (name, age, DOB, income, medical history, vehicle details, address, ID numbers, etc.).
+4. Check EACH policy rule and EACH mandatory document type against the client's documents.
+   - For every required document type, determine whether the client uploaded an authentic, valid document matching that requirement.
+   - If a mandatory required document type is missing, corrupted, or fails authenticity, record a rule check with status "violated" and severity "blocking".
+   - For every eligibility rule, determine whether the client satisfies it, violates it, or if the evidence is unclear.
+5. Return your analysis as ONLY a valid JSON object — no markdown, no prose, no code fences, no explanation outside the JSON.
 
 IMPORTANT RULES:
-- List EVERY rule you checked in the "reasons" array, not just failures. This must be fully auditable.
-- If a rule is clearly violated (e.g., age outside range, income below threshold, excluded medical condition), mark status as "violated" and severity as "blocking".
+- List EVERY rule and document requirement you checked in the "reasons" array, not just failures. This must be fully auditable.
+- If a rule is clearly violated or a mandatory document type is missing/unaccepted, mark status as "violated" and severity as "blocking".
 - If a rule has a minor concern but isn't a hard disqualifier, mark status as "violated" and severity as "warning".
-- If a rule is satisfied, mark status as "satisfied" with severity as null.
+- If a rule or document requirement is satisfied, mark status as "satisfied" with severity as null.
 - If you can't determine whether a rule is satisfied from the provided documents, mark status as "unclear" and severity as "warning".
 - If ANY rule has severity "blocking", the verdict MUST be "not_eligible".
 - If no rules are "blocking" but some are "unclear" or "warning", the verdict should be "needs_review".
-- Only if ALL rules are "satisfied" should the verdict be "eligible".
+- Only if ALL rules and required documents are "satisfied" should the verdict be "eligible".
 - confidence_score should reflect how confident you are in the overall assessment (0-100).
 
 REQUIRED JSON OUTPUT FORMAT (return ONLY this, nothing else):
@@ -34,8 +38,8 @@ REQUIRED JSON OUTPUT FORMAT (return ONLY this, nothing else):
   "summary": "1-2 sentence plain-language explanation of the overall result",
   "reasons": [
     {
-      "rule_checked": "plain-language description of the policy rule",
-      "policy_source": "which policy document and section/page this rule came from",
+      "rule_checked": "plain-language description of the policy rule or required document",
+      "policy_source": "which policy document/configuration section this rule came from",
       "status": "satisfied | violated | unclear",
       "client_evidence": "what in the client's documents supports or contradicts this rule, or null if not found",
       "severity": "blocking | warning | null"
@@ -114,7 +118,23 @@ export default {
         // ── 2. Fetch the submission ─────────────────────────────
         const { data: submission, error: subError } = await supabase
           .from("client_submissions")
-          .select("id, client_id, policy_id, status")
+          .select(`
+            id,
+            client_id,
+            policy_id,
+            status,
+            policies (
+              id,
+              name,
+              category,
+              category_id,
+              policy_categories (
+                id,
+                name,
+                description
+              )
+            )
+          `)
           .eq("id", submission_id)
           .single();
 
@@ -156,7 +176,7 @@ export default {
           console.error("[check-eligibility] Failed to set processing status:", statusError);
         }
 
-        // ── 4. Fetch document metadata ──────────────────────────
+        // ── 5. Fetch document metadata & required documents ─────
         const { data: policyDocs, error: pdError } = await supabase
           .from("policy_documents")
           .select("id, file_path, filename, document_type")
@@ -183,11 +203,31 @@ export default {
           );
         }
 
+        // Fetch required documents configured for this policy
+        const { data: reqDocs, error: rdError } = await supabase
+          .from("policy_required_documents")
+          .select("id, document_type, label, display_order")
+          .eq("policy_id", submission.policy_id)
+          .order("display_order", { ascending: true });
+
+        if (rdError) {
+          console.warn("[check-eligibility] Warning: Failed to fetch policy_required_documents:", rdError);
+        }
+
+        const effectiveRequiredDocs = (reqDocs && reqDocs.length > 0)
+          ? reqDocs
+          : [
+              { document_type: "id_proof", label: "Government ID Proof" },
+              { document_type: "medical_report", label: "Recent Medical Report" },
+              { document_type: "income_proof", label: "Income Proof" },
+              { document_type: "age_proof", label: "Age Proof" },
+            ];
+
         console.log(
-          `[check-eligibility] Found ${policyDocs?.length ?? 0} policy doc(s), ${clientDocs?.length ?? 0} client doc(s)`
+          `[check-eligibility] Found ${policyDocs?.length ?? 0} policy doc(s), ${clientDocs?.length ?? 0} client doc(s), ${effectiveRequiredDocs.length} required doc type(s)`
         );
 
-        // ── 5. Download files and build Gemini parts ────────────
+        // ── 6. Download files and build Gemini parts ────────────
         const parts: any[] = [];
 
         // Add a text label before policy documents
@@ -223,6 +263,17 @@ export default {
             },
           });
         }
+
+        // Add a text label describing the mandatory required documents for this policy
+        let reqDocsPrompt = "\n=== MANDATORY APPLICATION DOCUMENTS CONFIGURED FOR THIS POLICY ===\n";
+        reqDocsPrompt += `Policy: "${submission.policies?.name || "Insurance Policy"}"\n`;
+        reqDocsPrompt += `Category: ${submission.policies?.policy_categories?.name || submission.policies?.category || "General Insurance"}\n`;
+        reqDocsPrompt += `The administrator has configured the following ${effectiveRequiredDocs.length} mandatory document type(s) for this policy:\n`;
+        effectiveRequiredDocs.forEach((rd, idx) => {
+          reqDocsPrompt += `  ${idx + 1}. ${rd.label} (document_type key: "${rd.document_type}")\n`;
+        });
+        reqDocsPrompt += `\nVerification Task: Verify that the applicant has provided valid documentation for EACH of these required types, and that the contents satisfy all relevant policy criteria.\n`;
+        parts.push({ text: reqDocsPrompt });
 
         // Add a text label before client documents
         parts.push({
