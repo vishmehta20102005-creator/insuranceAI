@@ -316,6 +316,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 3. Verify or Create Conversation ───────────────────────
+    let isNewConversation = false;
+    let existingConv: any = null;
+
     if (conversationId) {
       // Check existing conversation and verify ownership
       const { data: conv, error: convError } = await adminClient
@@ -340,15 +343,18 @@ Deno.serve(async (req: Request) => {
           { status: 403, headers: corsHeaders }
         );
       }
+
+      existingConv = conv;
     } else {
-      // Create new conversation for this client
-      const initialTitle = message
-        ? message.length > 50
-          ? `${message.substring(0, 47)}...`
-          : message
-        : attachmentsList.length > 0
-          ? `${attachmentsList.length} Uploaded Doc${attachmentsList.length > 1 ? 's' : ''}`
-          : "New Conversation";
+      isNewConversation = true;
+      // Create new conversation for this client (cap title to 4-5 words max)
+      let initialTitle = "New Conversation";
+      if (message) {
+        const words = message.trim().split(/\s+/).filter(Boolean);
+        initialTitle = words.slice(0, 5).join(" ");
+      } else if (attachmentsList.length > 0) {
+        initialTitle = `${attachmentsList.length} Uploaded Doc${attachmentsList.length > 1 ? 's' : ''}`;
+      }
 
       const { data: newConv, error: createConvErr } = await adminClient
         .from("chat_conversations")
@@ -794,7 +800,7 @@ RECOMMENDED_POLICY_IDS: []`;
         }
 
         currentTurnParts.push({
-          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated or incompatible document>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified or if incompatible:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits with authentic Aadhaar / Govt ID.\n     - Income Proof: Verified net monthly income against policy minimum with authentic salary slip/ITR.\n     - Medical Report: Verified health status and absence of exclusion conditions with authentic diagnostic report.\n     - Vehicle / Motor Docs: Verified vehicle registration, ownership, and driving license validity with authentic RC.\n     - Property / Home Docs: Verified property ownership or address proof.\n     - Incompatible document: State that the detected document (e.g. marksheet, utility bill, selfie) is incompatible with the policy's required document (e.g. Aadhaar Card, RC).\n     - Hard rule violation: State the exact document and criterion that caused disqualification.\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING for the recommended policy: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s) required for that policy! (Check the "Required Documents" list configured for the policy in the catalog above. Never re-request documents that were already verified).\n   • If ALL required documents for the policy are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible, uploaded incompatible documents, or uploaded unaccepted documents: Label as **Required Documents:** and list the genuine documents required for that policy category.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE OR INCOMPATIBLE: If the applicant violates any hard rule or uploaded incompatible documents for a required slot, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 6 words> on its own line.\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
+          text: `=== APPLICANT'S REQUEST / SITUATION ===\n${userMsgContent}\n\nSTRICT INSTRUCTIONS FOR THIS MULTI-DOCUMENT / RECOMMENDATION RESPONSE:\n1. BREVITY & CONCISENESS (MANDATORY): Keep responses short, crisp, and direct (under 140 words total). Avoid long paragraphs, essays, or verbose disclaimers.\n2. DYNAMICALLY STRUCTURE YOUR RESPONSE IN EXACTLY THESE 3 SHORT SECTIONS:\n   **Eligibility Verdict**: 1 clear sentence:\n   • If Full Match: "Eligible for <Policy Name> — All verification requirements satisfied."\n   • If Ineligible: "Not Eligible for <Policy Name> — <Specific rule violated or incompatible document>" (or general if unaccepted document).\n   • If Partial Match (valid documents uploaded, but missing others): "Preliminary Fit for <Policy Name> — <X of N> requirements verified. Pending remaining documents."\n   **Suitability & Document Verification**:\n   • For each uploaded document, concisely state what it verified or if incompatible:\n     - ID / Age Proof: Verified name, DOB, and age against policy limits with authentic Aadhaar / Govt ID.\n     - Income Proof: Verified net monthly income against policy minimum with authentic salary slip/ITR.\n     - Medical Report: Verified health status and absence of exclusion conditions with authentic diagnostic report.\n     - Vehicle / Motor Docs: Verified vehicle registration, ownership, and driving license validity with authentic RC.\n     - Property / Home Docs: Verified property ownership or address proof.\n     - Incompatible document: State that the detected document (e.g. marksheet, utility bill, selfie) is incompatible with the policy's required document (e.g. Aadhaar Card, RC).\n     - Hard rule violation: State the exact document and criterion that caused disqualification.\n   **Required Documents / Next Steps**:\n   • If applicant uploaded documents and SOME ARE STILL MISSING for the recommended policy: Label as **Remaining Documents Needed:** and list ONLY the remaining missing document(s) required for that policy! (Check the "Required Documents" list configured for the policy in the catalog above. Never re-request documents that were already verified).\n   • If ALL required documents for the policy are verified and applicant is eligible: Label as **Next Steps:** and instruct them to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."\n   • If applicant is ineligible, uploaded incompatible documents, or uploaded unaccepted documents: Label as **Required Documents:** and list the genuine documents required for that policy category.\n3. ZERO RECOMMENDATIONS IF INELIGIBLE OR INCOMPATIBLE: If the applicant violates any hard rule or uploaded incompatible documents for a required slot, you MUST output RECOMMENDED_POLICY_IDS: [] and NEVER suggest applying or link to the policy.\n4. IF ELIGIBLE OR PRELIMINARY FIT: Output RECOMMENDED_POLICY_IDS: [<uuid>].\n5. Append CHAT_TITLE: <3 to 5 words> on its own line (summarizing applicant's initial inquiry in 4-5 words max).\n6. Append RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: [] at the very end.`,
         });
 
         // Build multi-turn history excluding the current turn (since we provide currentTurnParts)
@@ -901,7 +907,7 @@ RECOMMENDATION RULES:
   • Output RECOMMENDED_POLICY_IDS: [<uuid>] so they can preview the policy they are qualifying for.
 
 MANDATORY FOOTERS (at the very end, each on its own line):
-CHAT_TITLE: <3 to 6 words>
+CHAT_TITLE: <3 to 5 words>
 RECOMMENDED_POLICY_IDS: [<uuid>] or RECOMMENDED_POLICY_IDS: []`;
 
         geminiPayload = {
@@ -978,8 +984,8 @@ INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
 
 CONVERSATION SIDEBAR TITLE (MANDATORY):
 • At the end of your response, on its own line, append:
-CHAT_TITLE: <3 to 6 words>
-• Keep it clean, descriptive, title-cased, and without quotes, asterisks, or trailing punctuation.`;
+CHAT_TITLE: <3 to 5 words>
+• Keep it clean, descriptive, title-cased, max 4-5 words, based on the initial inquiry, and without quotes, asterisks, or trailing punctuation.`;
 
         geminiPayload = {
           system_instruction: {
@@ -1162,7 +1168,9 @@ CHAT_TITLE: <3 to 6 words>
       // Remove any surrounding quotes, asterisks, markdown hashes, or trailing punctuation
       extractedTitle = extractedTitle.replace(/^["'`*#]+|["'`*#.,;:]+$/g, "").trim();
       if (extractedTitle.length > 0) {
-        chatTitle = extractedTitle.length > 55 ? extractedTitle.slice(0, 52) + "..." : extractedTitle;
+        // Limit strictly to 4-5 words maximum as requested
+        const words = extractedTitle.split(/\s+/).filter(Boolean);
+        chatTitle = words.slice(0, 5).join(" ");
       }
       // Strip CHAT_TITLE tag from user-facing assistant reply so it never leaks into chat bubble
       assistantReply = assistantReply.replace(titleTagRegex, "").trim();
@@ -1191,11 +1199,19 @@ CHAT_TITLE: <3 to 6 words>
       );
     }
 
-    // Update conversation timestamp and title (if AI generated a new short description)
+    // Determine if this is the first turn for setting the conversation title.
+    // The title must strictly be based on the first conversation turn only, never updated on follow-ups.
+    const isFirstTurn =
+      isNewConversation ||
+      !existingConv?.title ||
+      existingConv.title === "New Conversation" ||
+      existingConv.title.endsWith("...");
+
+    // Update conversation timestamp and title (ONLY on first turn)
     const updateConvPayload: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
-    if (chatTitle) {
+    if (chatTitle && isFirstTurn) {
       updateConvPayload.title = chatTitle;
     }
 
@@ -1300,7 +1316,9 @@ CHAT_TITLE: <3 to 6 words>
     return Response.json(
       {
         conversation_id: conversationId,
-        conversation_title: chatTitle || undefined,
+        conversation_title: isFirstTurn
+          ? (chatTitle || existingConv?.title || undefined)
+          : (existingConv?.title || chatTitle || undefined),
         recommended_policy_ids: recommendedPolicyIds,
         messages: sanitizedMessages,
         attachments: allAttachments || [],

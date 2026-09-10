@@ -472,6 +472,30 @@ export default function ClientAdvisor() {
   // State
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(conversationIdFromUrl || null);
+
+  // Client-side hidden/deleted conversations (persisted per user in localStorage without deleting rows from DB)
+  const getHiddenStorageKey = () => `insuranceai_hidden_conversations_${user?.id || 'guest'}`;
+
+  const [hiddenConvIds, setHiddenConvIds] = useState(() => {
+    try {
+      const key = `insuranceai_hidden_conversations_${user?.id || 'guest'}`;
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Keep hiddenConvIds synced if authenticated user changes
+  useEffect(() => {
+    try {
+      const key = getHiddenStorageKey();
+      const saved = localStorage.getItem(key);
+      setHiddenConvIds(saved ? JSON.parse(saved) : []);
+    } catch (e) {
+      console.error('Failed to parse hidden conversations from localStorage:', e);
+    }
+  }, [user?.id]);
   const [messages, setMessages] = useState([]);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -578,9 +602,18 @@ export default function ClientAdvisor() {
       });
       setPoliciesMap(pMap);
 
-      // If URL had no id but conversations exist, pick the most recent one
+      // If URL had no id but conversations exist, pick the most recent visible one
       if (!conversationIdFromUrl && convList.length > 0) {
-        setActiveConversationId(convList[0].id);
+        const key = `insuranceai_hidden_conversations_${user?.id || 'guest'}`;
+        let hidden = [];
+        try {
+          const s = localStorage.getItem(key);
+          if (s) hidden = JSON.parse(s);
+        } catch {}
+        const firstVisible = convList.find((c) => !hidden.includes(c.id));
+        if (firstVisible) {
+          setActiveConversationId(firstVisible.id);
+        }
       }
     } catch (err) {
       console.error('Failed to load advisor data:', err);
@@ -764,7 +797,45 @@ export default function ClientAdvisor() {
     navigate('/login', { replace: true });
   }
 
-  const activeConv = conversations.find((c) => c.id === activeConversationId);
+  function handleDeleteConversation(convId, e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!convId) return;
+
+    const confirmed = window.confirm(
+      'Are you sure you want to remove this conversation from your chat list?'
+    );
+    if (!confirmed) return;
+
+    const key = getHiddenStorageKey();
+    const updatedHidden = Array.from(new Set([...hiddenConvIds, convId]));
+    setHiddenConvIds(updatedHidden);
+    try {
+      localStorage.setItem(key, JSON.stringify(updatedHidden));
+    } catch (err) {
+      console.error('Failed to update hidden conversations in localStorage:', err);
+    }
+
+    // If deleting the currently active conversation, switch to next visible or start fresh
+    if (convId === activeConversationId) {
+      const remainingVisible = conversations.filter(
+        (c) => c.id !== convId && !updatedHidden.includes(c.id)
+      );
+      if (remainingVisible.length > 0) {
+        setActiveConversationId(remainingVisible[0].id);
+      } else {
+        handleStartNewChat();
+      }
+    }
+  }
+
+  const visibleConversations = conversations.filter(
+    (c) => !hiddenConvIds.includes(c.id)
+  );
+
+  const activeConv = visibleConversations.find((c) => c.id === activeConversationId);
 
   return (
     <div className="dashboard-layout">
@@ -845,26 +916,49 @@ export default function ClientAdvisor() {
                 <div className="skeleton-line" style={{ width: '80%' }} />
                 <div className="skeleton-line" style={{ width: '60%' }} />
               </div>
-            ) : conversations.length === 0 ? (
+            ) : visibleConversations.length === 0 ? (
               <div className="advisor-no-history">
                 <p>No past consultations yet.</p>
                 <small>Conversations will appear here as you chat.</small>
               </div>
             ) : (
               <div className="advisor-history-list">
-                {conversations.map((c) => {
+                {visibleConversations.map((c) => {
                   const isActive = c.id === activeConversationId;
                   return (
-                    <button
+                    <div
                       key={c.id}
                       onClick={() => setActiveConversationId(c.id)}
                       className={`advisor-history-item ${isActive ? 'active' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          setActiveConversationId(c.id);
+                        }
+                      }}
                     >
                       <div className="advisor-history-item-header">
-                        <span className="advisor-history-title">{c.title || 'Untitled Consultation'}</span>
+                        <span className="advisor-history-title" title={c.title || 'Untitled Consultation'}>
+                          {c.title || 'Untitled Consultation'}
+                        </span>
+                        <button
+                          type="button"
+                          className="advisor-history-delete-btn"
+                          title="Remove chat from view"
+                          aria-label="Remove chat from view"
+                          onClick={(e) => handleDeleteConversation(c.id, e)}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
                       </div>
                       <span className="advisor-history-time">{formatRelativeTime(c.updated_at)}</span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -885,8 +979,26 @@ export default function ClientAdvisor() {
                 {activeConv ? activeConv.title : 'New Policy Consultation'}
               </h2>
             </div>
-            <div className="advisor-chat-badge-info">
-              <span>Preliminary Guidance Tool</span>
+            <div className="advisor-chat-topbar-actions">
+              <div className="advisor-chat-badge-info">
+                <span>Preliminary Guidance Tool</span>
+              </div>
+              {activeConversationId && (
+                <button
+                  type="button"
+                  className="advisor-topbar-delete-btn"
+                  title="Remove this chat from view"
+                  onClick={(e) => handleDeleteConversation(activeConversationId, e)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                  <span>Delete Chat</span>
+                </button>
+              )}
             </div>
           </div>
 
