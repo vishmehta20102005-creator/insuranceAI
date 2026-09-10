@@ -87,7 +87,15 @@ export default function EligibilityResultCard({
   }, [reasons]);
 
   // Tab state for non-approved detailed rule breakdown
-  const defaultTab = isSuccess ? 'satisfied' : issues.length > 0 ? 'issues' : unclear.length > 0 ? 'unclear' : 'all';
+  const defaultTab = isSuccess
+    ? 'satisfied'
+    : currentStatus === 'needs_review'
+    ? (issues.length > 0 ? 'issues' : unclear.length > 0 ? 'unclear' : '')
+    : issues.length > 0
+    ? 'issues'
+    : unclear.length > 0
+    ? 'unclear'
+    : 'all';
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   // History tab state: 'docs' | 'audit'
@@ -376,104 +384,112 @@ export default function EligibilityResultCard({
               )}
 
               {/* Scannable interactive metrics bar */}
-              <div className="eligibility-metrics-bar">
-                <button
-                  type="button"
-                  className={`metric-chip ${activeTab === 'all' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('all')}
-                  title="Show all rules verified"
-                >
-                  <span className="metric-label">Rules Verified</span>
-                  <span className="metric-value">{reasons.length}</span>
-                </button>
+              {(issues.length > 0 || unclear.length > 0 || (currentStatus !== 'needs_review' && (satisfied.length > 0 || reasons.length > 0))) && (
+                <div className="eligibility-metrics-bar">
+                  {currentStatus !== 'needs_review' && (
+                    <button
+                      type="button"
+                      className={`metric-chip ${activeTab === 'all' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('all')}
+                      title="Show all rules verified"
+                    >
+                      <span className="metric-label">Rules Verified</span>
+                      <span className="metric-value">{reasons.length}</span>
+                    </button>
+                  )}
+                  {issues.length > 0 && (
+                    <button
+                      type="button"
+                      className={`metric-chip metric-chip-issues ${activeTab === 'issues' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('issues')}
+                      title="Filter to issues to resolve"
+                    >
+                      <span className="metric-label">Issues Found</span>
+                      <span className="metric-value" style={{ color: '#dc2626' }}>{issues.length}</span>
+                    </button>
+                  )}
+                  {unclear.length > 0 && (
+                    <button
+                      type="button"
+                      className={`metric-chip metric-chip-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('unclear')}
+                      title="Filter to items needing clarification"
+                    >
+                      <span className="metric-label">Needs Clarification</span>
+                      <span className="metric-value" style={{ color: '#d97706' }}>{unclear.length}</span>
+                    </button>
+                  )}
+                  {satisfied.length > 0 && currentStatus !== 'needs_review' && (
+                    <button
+                      type="button"
+                      className={`metric-chip metric-chip-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
+                      onClick={() => setActiveTab('satisfied')}
+                      title="Filter to requirements met"
+                    >
+                      <span className="metric-label">Requirements Met</span>
+                      <span className="metric-value" style={{ color: '#16a34a' }}>{satisfied.length}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Filter Tabs for Issues / Rules */}
+            {(issues.length > 0 || unclear.length > 0 || (currentStatus !== 'needs_review' && (satisfied.length > 0 || reasons.length > 0))) && (
+              <div className="rules-tab-bar" role="tablist" aria-label="Filter rules by status">
                 {issues.length > 0 && (
                   <button
                     type="button"
-                    className={`metric-chip metric-chip-issues ${activeTab === 'issues' ? 'active' : ''}`}
+                    className={`rules-tab-btn tab-issues ${activeTab === 'issues' ? 'active' : ''}`}
                     onClick={() => setActiveTab('issues')}
-                    title="Filter to issues to resolve"
+                    role="tab"
+                    aria-selected={activeTab === 'issues'}
                   >
-                    <span className="metric-label">Issues Found</span>
-                    <span className="metric-value" style={{ color: '#dc2626' }}>{issues.length}</span>
+                    <span className="rules-tab-dot dot-issue" />
+                    <span>Issues to Resolve</span>
+                    <span className="rules-tab-count badge-issues">{issues.length}</span>
                   </button>
                 )}
                 {unclear.length > 0 && (
                   <button
                     type="button"
-                    className={`metric-chip metric-chip-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
+                    className={`rules-tab-btn tab-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
                     onClick={() => setActiveTab('unclear')}
-                    title="Filter to items needing clarification"
+                    role="tab"
+                    aria-selected={activeTab === 'unclear'}
                   >
-                    <span className="metric-label">Needs Clarification</span>
-                    <span className="metric-value" style={{ color: '#d97706' }}>{unclear.length}</span>
+                    <span className="rules-tab-dot dot-unclear" />
+                    <span>Needs Clarification</span>
+                    <span className="rules-tab-count badge-unclear">{unclear.length}</span>
                   </button>
                 )}
-                {satisfied.length > 0 && (
+                {satisfied.length > 0 && currentStatus !== 'needs_review' && (
                   <button
                     type="button"
-                    className={`metric-chip metric-chip-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
+                    className={`rules-tab-btn tab-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
                     onClick={() => setActiveTab('satisfied')}
-                    title="Filter to requirements met"
+                    role="tab"
+                    aria-selected={activeTab === 'satisfied'}
                   >
-                    <span className="metric-label">Requirements Met</span>
-                    <span className="metric-value" style={{ color: '#16a34a' }}>{satisfied.length}</span>
+                    <span className="rules-tab-dot dot-satisfied" />
+                    <span>Requirements Met</span>
+                    <span className="rules-tab-count badge-satisfied">{satisfied.length}</span>
+                  </button>
+                )}
+                {currentStatus !== 'needs_review' && (
+                  <button
+                    type="button"
+                    className={`rules-tab-btn tab-all ${activeTab === 'all' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('all')}
+                    role="tab"
+                    aria-selected={activeTab === 'all'}
+                  >
+                    <span>All Rules</span>
+                    <span className="rules-tab-count badge-neutral">{reasons.length}</span>
                   </button>
                 )}
               </div>
-            </div>
-
-            {/* Filter Tabs for Issues / Rules */}
-            <div className="rules-tab-bar" role="tablist" aria-label="Filter rules by status">
-              {issues.length > 0 && (
-                <button
-                  type="button"
-                  className={`rules-tab-btn tab-issues ${activeTab === 'issues' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('issues')}
-                  role="tab"
-                  aria-selected={activeTab === 'issues'}
-                >
-                  <span className="rules-tab-dot dot-issue" />
-                  <span>Issues to Resolve</span>
-                  <span className="rules-tab-count badge-issues">{issues.length}</span>
-                </button>
-              )}
-              {unclear.length > 0 && (
-                <button
-                  type="button"
-                  className={`rules-tab-btn tab-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('unclear')}
-                  role="tab"
-                  aria-selected={activeTab === 'unclear'}
-                >
-                  <span className="rules-tab-dot dot-unclear" />
-                  <span>Needs Clarification</span>
-                  <span className="rules-tab-count badge-unclear">{unclear.length}</span>
-                </button>
-              )}
-              {satisfied.length > 0 && (
-                <button
-                  type="button"
-                  className={`rules-tab-btn tab-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('satisfied')}
-                  role="tab"
-                  aria-selected={activeTab === 'satisfied'}
-                >
-                  <span className="rules-tab-dot dot-satisfied" />
-                  <span>Requirements Met</span>
-                  <span className="rules-tab-count badge-satisfied">{satisfied.length}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                className={`rules-tab-btn tab-all ${activeTab === 'all' ? 'active' : ''}`}
-                onClick={() => setActiveTab('all')}
-                role="tab"
-                aria-selected={activeTab === 'all'}
-              >
-                <span>All Rules</span>
-                <span className="rules-tab-count badge-neutral">{reasons.length}</span>
-              </button>
-            </div>
+            )}
 
             {/* Grouped Reasons List */}
             <div className="reasons-section">
@@ -529,7 +545,7 @@ export default function EligibilityResultCard({
                 </div>
               )}
 
-              {(activeTab === 'satisfied' || activeTab === 'all') && satisfied.length > 0 && (
+              {currentStatus !== 'needs_review' && (activeTab === 'satisfied' || activeTab === 'all') && satisfied.length > 0 && (
                 <div className="reasons-group satisfied-group">
                   <div className="reasons-group-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -549,6 +565,50 @@ export default function EligibilityResultCard({
                     {satisfied.map((r, idx) => (
                       <ReasonItem key={`satisfied-${idx}`} reason={r} type="satisfied" />
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Status notice when under manual underwriting review without blocking issues */}
+              {currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0 && (
+                <div
+                  style={{
+                    padding: '20px 24px',
+                    background: 'rgba(217, 119, 6, 0.06)',
+                    border: '1px solid rgba(217, 119, 6, 0.2)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '14px',
+                    margin: '12px 0 20px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '50%',
+                      background: '#fef3c7',
+                      color: '#d97706',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '1.1rem',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, color: 'var(--color-text)', fontSize: '0.95rem' }}>
+                      Underwriting Review In Progress
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                      Your application and submitted documents are undergoing manual underwriting assessment. An insurance administrator will verify your file and notify you once the decision is finalized.
+                    </div>
                   </div>
                 </div>
               )}

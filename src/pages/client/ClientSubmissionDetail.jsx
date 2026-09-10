@@ -429,51 +429,6 @@ export default function ClientSubmissionDetail() {
             </div>
           </div>
         )}
-
-        {/* ── Action Section ── */}
-        <div
-          className="card"
-          style={{
-            padding: '24px 28px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '16px',
-            background: 'var(--color-surface)',
-          }}
-        >
-          <div>
-            <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 4px' }}>
-              {canReapply
-                ? 'Ready to Submit Updated Documents?'
-                : isSupersededByApproved
-                ? 'Policy Coverage Confirmed'
-                : 'Questions About Your Application?'}
-            </h4>
-            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', margin: 0 }}>
-              {canReapply
-                ? 'You can re-apply for this policy with revised documents that satisfy the underwriting requirements.'
-                : isSupersededByApproved
-                ? 'Your subsequent application has been approved. You are actively covered under this policy.'
-                : 'Need guidance or want to check other insurance options? Our AI Advisor is available 24/7.'}
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            {canReapply && (
-              <Link to={`/client/policies/${submission.policy_id}`} className="btn btn-primary">
-                Reapply for {policy?.name || 'This Policy'} →
-              </Link>
-            )}
-            <Link to="/client/advisor" className="btn btn-ghost">
-              Consult AI Advisor
-            </Link>
-            <Link to="/client/submissions" className="btn btn-ghost">
-              Back to Submissions
-            </Link>
-          </div>
-        </div>
       </main>
     </div>
   );
