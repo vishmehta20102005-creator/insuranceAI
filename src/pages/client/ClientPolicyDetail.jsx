@@ -359,6 +359,34 @@ export default function ClientPolicyDetail() {
               <span className="dashboard-brand-name">InsuranceAI</span>
             </Link>
           </div>
+          <div className="advisor-header-nav">
+            <Link to="/client/policies" className="advisor-nav-link active">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="9" y1="9" x2="15" y2="9" />
+                <line x1="9" y1="13" x2="15" y2="13" />
+                <line x1="9" y1="17" x2="13" y2="17" />
+              </svg>
+              <span>Browse Policies</span>
+            </Link>
+            <Link to="/client/submissions" className="advisor-nav-link">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
+              <span>My Submissions</span>
+            </Link>
+            <Link to="/client/advisor" className="advisor-nav-link">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>AI Advisor</span>
+            </Link>
+          </div>
+
           <div className="dashboard-user">
             <span className="dashboard-user-name">{profile?.full_name || profile?.email}</span>
             <button onClick={handleSignOut} className="btn btn-ghost btn-sm">
