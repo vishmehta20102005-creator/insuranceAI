@@ -967,7 +967,8 @@ CRITICAL RULE ON POLICY AVAILABILITY:
   - ONLY confirm availability if that category/policy is explicitly in the live list above!
   - If they ask about a category or policy that is NOT live (such as Life Insurance, Travel Insurance, Home Insurance, etc.):
     - Clearly and directly state: "We currently do not offer [Category Name, e.g. Life Insurance] policies on InsuranceAI."
-    - Explicitly state which categories ARE currently live: "${liveCategories.join(", ")}".
+    - State which categories ARE currently live: "${liveCategories.join(", ")}".
+    - CRITICAL: NEVER recommend, suggest applying for, or link to an unrelated policy (e.g. NEVER recommend or link to Health or Car when asked about Life insurance)! Keep the answer strictly about the requested category and available offerings.
     - NEVER claim, promise, or hallucinate that InsuranceAI offers a policy or category that is not in the live published list above!
 • For live policies (e.g. Car Insurance or Health Insurance): Confirm that we offer it and state what is needed to apply.
 
@@ -1079,18 +1080,23 @@ CHAT_TITLE: <3 to 6 words>
       assistantReply = assistantReply.replace(recTagRegex, "").trim();
     }
 
-    // ── Check if response indicates ineligibility or no match ──
+    // ── Check if response indicates ineligibility, no match, or unoffered category ──
     const replyLower = assistantReply.toLowerCase();
     const isIneligibleOrNoMatch =
-      /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit/i.test(
+      /ineligib|not eligible|do not meet|does not meet|disqualif|exceeds the maximum|exceeds the limit|cannot recommend|no eligible policies|no policies in our current catalog|would be rejected|no policy suiting|exceeds the hard upper limit|do not offer|does not offer|not offered|not available|not currently offer|don't offer|dont offer|no live policies|not currently have|no matching policy/i.test(
         replyLower
       );
 
-    if (isIneligibleOrNoMatch) {
-      // Applicant is ineligible: MUST NEVER output recommended policy IDs or apply links!
+    if (isIneligibleOrNoMatch || !isRecommendation) {
+      // Ineligible, unoffered category, or general informational chat:
+      // NEVER recommend policy IDs or add unsolicited apply links!
       recommendedPolicyIds = [];
+      // Clean up any stray apply links if unoffered or not in recommendation mode
+      if (isIneligibleOrNoMatch || !isRecommendation) {
+        assistantReply = assistantReply.replace(/\n*👉\s*\[Apply for [^\]]+\]\([^)]+\)/gi, "").trim();
+      }
     } else {
-      // Applicant is eligible: Auto-repair missing links only for actually qualified policies
+      // Formal recommendation mode: Auto-repair missing links only for actually qualified policies
       if (!publishedPolicies || publishedPolicies.length === 0) {
         const { data: pubPolicies } = await adminClient
           .from("policies")
@@ -1099,13 +1105,17 @@ CHAT_TITLE: <3 to 6 words>
         publishedPolicies = pubPolicies || [];
       }
 
-      // If recommendedPolicyIds is empty but applicant is eligible, infer matching policy from text
+      // If recommendedPolicyIds is empty but applicant is explicitly declared eligible/preliminary fit,
+      // infer matching policy ONLY if the text explicitly states "Eligible for <Name>" or "Preliminary Fit for <Name>"
       if (recommendedPolicyIds.length === 0) {
         for (const policy of publishedPolicies) {
-          if (
-            replyLower.includes(policy.name.toLowerCase()) ||
-            assistantReply.includes(policy.id.substring(0, 16))
-          ) {
+          const pNameLower = policy.name.toLowerCase();
+          const isExplicitMatch =
+            replyLower.includes(`eligible for ${pNameLower}`) ||
+            replyLower.includes(`preliminary fit for ${pNameLower}`) ||
+            assistantReply.includes(`[Apply for ${policy.name}]`) ||
+            assistantReply.includes(policy.id.substring(0, 16));
+          if (isExplicitMatch) {
             recommendedPolicyIds.push(policy.id);
             break;
           }
