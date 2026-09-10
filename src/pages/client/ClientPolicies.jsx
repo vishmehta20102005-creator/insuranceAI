@@ -119,6 +119,21 @@ export default function ClientPolicies() {
     return matchesCat && matchesSearch;
   });
 
+  const categoryGroups = Object.values(
+    filteredPolicies.reduce((acc, policy) => {
+      const catName = policy.category || 'General Insurance';
+      if (!acc[catName]) {
+        acc[catName] = {
+          name: catName,
+          description: policy.policy_categories?.description || null,
+          policies: [],
+        };
+      }
+      acc[catName].policies.push(policy);
+      return acc;
+    }, {})
+  );
+
   return (
     <div className="dashboard-layout">
       <header className="dashboard-header">
@@ -179,7 +194,7 @@ export default function ClientPolicies() {
           {/* ── Available Policies ── */}
           <div className="dashboard-welcome">
             <h1>Available Policies</h1>
-            <p>Browse published insurance policies. Click a policy row to preview its documents, or click <strong>Apply</strong> to start your application.</p>
+            <p>Browse published insurance policies grouped by category. Click a policy row to preview official documents, or click <strong>Apply</strong> to start your application.</p>
           </div>
 
           <div className="content-toolbar">
@@ -219,183 +234,205 @@ export default function ClientPolicies() {
             <div className="page-loader" style={{ minHeight: '200px' }}>
               <div className="spinner" />
             </div>
-          ) : filteredPolicies.length > 0 ? (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div className="table-responsive">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: '36px' }} />
-                      <th>Policy Name</th>
-                      <th>Category</th>
-                      <th>Documents</th>
-                      <th>Last Updated</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredPolicies.map((policy) => {
-                      const isExpanded   = expandedId === policy.id;
-                      const docs         = policyDocs[policy.id] || [];
-                      const isLoadingDocs = !!docsLoading[policy.id];
+          ) : categoryGroups.length > 0 ? (
+            <div className="policy-category-groups">
+              {categoryGroups.map((group) => (
+                <div key={group.name} className="policy-category-group" style={{ marginBottom: '36px' }}>
+                  {/* Category Header */}
+                  <div className="policy-category-header" style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    marginBottom: '12px',
+                    paddingBottom: '8px',
+                    borderBottom: '2px solid var(--color-border)',
+                  }}>
+                    <div>
+                      <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{group.name}</span>
+                        <span className="badge-category" style={{ fontSize: '11px', fontWeight: 600 }}>
+                          {group.policies.length} {group.policies.length === 1 ? 'Policy' : 'Policies'}
+                        </span>
+                      </h2>
+                      {group.description && (
+                        <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                          {group.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
 
-                      // Find latest submission status for this policy
-                      const latestSub = submissions
-                        .filter((s) => s.policy_id === policy.id)
-                        .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at))[0];
-                      const subStatus = latestSub?.status ?? null;
-
-                      return (
-                        <Fragment key={policy.id}>
-                          {/* Policy row */}
-                          <tr
-                            className="clickable-row"
-                            onClick={() => handleTogglePolicy(policy.id)}
-                          >
-                            {/* Chevron */}
-                            <td style={{ paddingRight: 0, width: '36px' }}>
-                              <svg
-                                width="14" height="14" viewBox="0 0 14 14" fill="none"
-                                stroke="var(--color-text-muted)" strokeWidth="2" strokeLinecap="round"
-                                style={{
-                                  display: 'block', margin: '0 auto',
-                                  transform: isExpanded ? 'rotate(90deg)' : 'none',
-                                  transition: 'transform 0.2s ease',
-                                }}
-                              >
-                                <polyline points="5 2 10 7 5 12" />
-                              </svg>
-                            </td>
-
-                            <td>
-                              <div className="policy-name-cell">
-                                <span className="policy-title">{policy.name}</span>
-                                {policy.description && (
-                                  <span className="policy-desc-snippet">{policy.description}</span>
-                                )}
-                              </div>
-                            </td>
-
-                            <td>
-                              <span className={`badge-category badge-category-${policy.category}`}>
-                                {policy.category}
-                              </span>
-                            </td>
-
-                            <td>
-                              <span className="doc-count-pill">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                  <polyline points="14 2 14 8 20 8" />
-                                </svg>
-                                {policy.documentsCount} {policy.documentsCount === 1 ? 'doc' : 'docs'}
-                              </span>
-                            </td>
-
-                            <td className="cell-muted">
-                              {new Date(policy.updated_at || policy.created_at).toLocaleDateString(undefined, {
-                                month: 'short', day: 'numeric', year: 'numeric',
-                              })}
-                            </td>
-
-                            <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                              {subStatus && !['rejected', 'not_eligible', 'needs_review'].includes(subStatus) ? (
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                                  <SubmissionStatusBadge status={subStatus} />
-                                  <Link
-                                    to={`/client/policies/${policy.id}`}
-                                    className="btn btn-ghost btn-sm"
-                                  >
-                                    View
-                                  </Link>
-                                </div>
-                              ) : (
-                                <Link
-                                  to={`/client/policies/${policy.id}`}
-                                  className="btn btn-primary btn-sm"
-                                >
-                                  {['rejected', 'not_eligible', 'needs_review'].includes(subStatus) ? 'Reapply' : 'Apply'}
-                                </Link>
-                              )}
-                            </td>
+                  {/* Category Policies Table */}
+                  <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div className="table-responsive">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '36px' }} />
+                            <th>Policy Name</th>
+                            <th>Documents</th>
+                            <th>Last Updated</th>
+                            <th style={{ textAlign: 'right' }}>Action</th>
                           </tr>
+                        </thead>
+                        <tbody>
+                          {group.policies.map((policy) => {
+                            const isExpanded    = expandedId === policy.id;
+                            const docs          = policyDocs[policy.id] || [];
+                            const isLoadingDocs = !!docsLoading[policy.id];
 
-                          {/* Expanded docs sub-row */}
-                          {isExpanded && (
-                            <tr>
-                              <td style={{ border: 'none', padding: 0 }} />
-                              <td colSpan={5} style={{ paddingTop: '4px', paddingBottom: '16px', borderTop: 'none' }}>
-                                {isLoadingDocs ? (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)', fontSize: '14px', padding: '8px 0' }}>
-                                    <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
-                                    Loading documents…
-                                  </div>
-                                ) : docs.length === 0 ? (
-                                  <p style={{ color: 'var(--color-text-muted)', fontSize: '14px', margin: '8px 0 0' }}>
-                                    No documents attached to this policy yet.
-                                  </p>
-                                ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
-                                    {docs.map((doc) => (
-                                      <div key={doc.id} style={{
-                                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                        padding: '10px 14px',
-                                        background: 'var(--color-surface-2)',
-                                        borderRadius: '8px',
-                                        border: '1px solid var(--color-border)',
-                                        gap: '12px',
-                                      }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
-                                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                                            stroke="var(--color-accent)" strokeWidth="1.75" style={{ flexShrink: 0 }}>
-                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                            <polyline points="14 2 14 8 20 8" />
-                                            <line x1="16" y1="13" x2="8" y2="13" />
-                                            <line x1="16" y1="17" x2="8" y2="17" />
-                                          </svg>
-                                          <div style={{ minWidth: 0 }}>
-                                            <div style={{ fontSize: '14px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={doc.filename}>
-                                              {doc.filename}
-                                            </div>
-                                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                                              {formatFileSize(doc.file_size)}
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <div style={{ flexShrink: 0 }}>{renderDocTypeBadge(doc.document_type)}</div>
-                                        <button
+                            // Find latest submission status for this policy
+                            const latestSub = submissions
+                              .filter((s) => s.policy_id === policy.id)
+                              .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at))[0];
+                            const subStatus = latestSub?.status ?? null;
+
+                            return (
+                              <Fragment key={policy.id}>
+                                {/* Policy row */}
+                                <tr
+                                  className="clickable-row"
+                                  onClick={() => handleTogglePolicy(policy.id)}
+                                >
+                                  {/* Chevron */}
+                                  <td style={{ paddingRight: 0, width: '36px' }}>
+                                    <svg
+                                      width="14" height="14" viewBox="0 0 14 14" fill="none"
+                                      stroke="var(--color-text-muted)" strokeWidth="2" strokeLinecap="round"
+                                      style={{
+                                        display: 'block', margin: '0 auto',
+                                        transform: isExpanded ? 'rotate(90deg)' : 'none',
+                                        transition: 'transform 0.2s ease',
+                                      }}
+                                    >
+                                      <polyline points="5 2 10 7 5 12" />
+                                    </svg>
+                                  </td>
+
+                                  <td>
+                                    <div className="policy-name-cell">
+                                      <span className="policy-title">{policy.name}</span>
+                                      {policy.description && (
+                                        <span className="policy-desc-snippet">{policy.description}</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  <td>
+                                    <span className="doc-count-pill">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                      </svg>
+                                      {policy.documentsCount} {policy.documentsCount === 1 ? 'doc' : 'docs'}
+                                    </span>
+                                  </td>
+
+                                  <td className="cell-muted">
+                                    {new Date(policy.updated_at || policy.created_at).toLocaleDateString(undefined, {
+                                      month: 'short', day: 'numeric', year: 'numeric',
+                                    })}
+                                  </td>
+
+                                  <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                                    {subStatus && !['rejected', 'not_eligible', 'needs_review'].includes(subStatus) ? (
+                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                        <SubmissionStatusBadge status={subStatus} />
+                                        <Link
+                                          to={`/client/policies/${policy.id}`}
                                           className="btn btn-ghost btn-sm"
-                                          style={{ flexShrink: 0 }}
-                                          onClick={(e) => { e.stopPropagation(); handleViewDocument(doc); }}
-                                          disabled={viewingDocId === doc.id}
-                                          title="Open in browser"
                                         >
-                                          {viewingDocId === doc.id ? (
-                                            <><span className="btn-spinner-dark" /> Opening…</>
-                                          ) : (
-                                            <>
-                                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                                <polyline points="15 3 21 3 21 9" />
-                                                <line x1="10" y1="14" x2="21" y2="3" />
-                                              </svg>
-                                              View
-                                            </>
-                                          )}
-                                        </button>
+                                          View
+                                        </Link>
                                       </div>
-                                    ))}
-                                  </div>
+                                    ) : (
+                                      <Link
+                                        to={`/client/policies/${policy.id}`}
+                                        className="btn btn-primary btn-sm"
+                                      >
+                                        {['rejected', 'not_eligible', 'needs_review'].includes(subStatus) ? 'Reapply' : 'Apply'}
+                                      </Link>
+                                    )}
+                                  </td>
+                                </tr>
+
+                                {/* Expanded docs sub-row */}
+                                {isExpanded && (
+                                  <tr>
+                                    <td style={{ border: 'none', padding: 0 }} />
+                                    <td colSpan={4} style={{ paddingTop: '4px', paddingBottom: '16px', borderTop: 'none' }}>
+                                      {isLoadingDocs ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-muted)', fontSize: '14px', padding: '8px 0' }}>
+                                          <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
+                                          Loading documents…
+                                        </div>
+                                      ) : docs.length === 0 ? (
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '14px', margin: '8px 0 0' }}>
+                                          No documents attached to this policy yet.
+                                        </p>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                                          {docs.map((doc) => (
+                                            <div key={doc.id} style={{
+                                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                              padding: '10px 14px',
+                                              background: 'var(--color-surface-2)',
+                                              borderRadius: '8px',
+                                              border: '1px solid var(--color-border)',
+                                              gap: '12px',
+                                            }}>
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                                                  stroke="var(--color-accent)" strokeWidth="1.75" style={{ flexShrink: 0 }}>
+                                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                                  <polyline points="14 2 14 8 20 8" />
+                                                </svg>
+                                                <div style={{ minWidth: 0 }}>
+                                                  <div style={{ fontWeight: 500, fontSize: '14px', color: 'var(--color-text)' }}>
+                                                    {doc.filename}
+                                                  </div>
+                                                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                                    {renderDocTypeBadge(doc.document_type)}
+                                                    <span style={{ margin: '0 6px' }}>•</span>
+                                                    {formatFileSize(doc.file_size)}
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              <button
+                                                type="button"
+                                                onClick={() => handleViewDocument(doc)}
+                                                className="btn btn-ghost btn-sm"
+                                                disabled={viewingDocId === doc.id}
+                                                style={{ flexShrink: 0 }}
+                                              >
+                                                {viewingDocId === doc.id ? 'Opening…' : (
+                                                  <>
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                                      <polyline points="15 3 21 3 21 9" />
+                                                      <line x1="10" y1="14" x2="21" y2="3" />
+                                                    </svg>
+                                                    View
+                                                  </>
+                                                )}
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
                                 )}
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="empty-state">

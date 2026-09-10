@@ -10,6 +10,7 @@ import {
   getSubmissionDocumentSignedUrl,
   fetchEligibilityResult,
 } from '../../lib/submissions';
+import { fetchPolicyRequiredDocuments } from '../../lib/policies';
 import EligibilityResultCard from '../../components/client/EligibilityResultCard';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -19,6 +20,24 @@ function formatFileSize(bytes) {
   const kb = bytes / 1024;
   return kb < 1024 ? `${kb.toFixed(1)} KB` : `${(kb / 1024).toFixed(2)} MB`;
 }
+
+function formatDocTypeLabel(type) {
+  if (!type) return '';
+  return type
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const PRESET_HINTS = {
+  id_proof: 'Passport, Aadhaar, Driving Licence, National ID, etc.',
+  medical_report: 'Recent health checkup or doctor certificate.',
+  income_proof: 'Salary slip, ITR, or bank statement.',
+  age_proof: 'Birth certificate, school certificate, etc.',
+  vehicle_rc: 'Official vehicle registration certificate (RC).',
+  driving_license: 'Valid driver license copy.',
+  address_proof: 'Utility bill, rental agreement, bank statement.',
+  property_deed: 'Ownership deed or title document.',
+};
 
 function SubmissionStatusBadge({ status }) {
   const cfg = {
@@ -41,17 +60,14 @@ export default function ClientPolicyDetail() {
   const { user, profile, signOut } = useAuth();
 
   // ── page-level state
-  const [policy,     setPolicy]     = useState(null);
-  const [submission, setSubmission] = useState(null); // most recent submission or null
-  const [pageLoading, setPageLoading] = useState(true);
-  const [pageError,   setPageError]   = useState('');
+  const [policy,       setPolicy]       = useState(null);
+  const [requiredDocs, setRequiredDocs] = useState([]);
+  const [submission,   setSubmission]   = useState(null); // most recent submission or null
+  const [pageLoading,  setPageLoading]  = useState(true);
+  const [pageError,    setPageError]    = useState('');
 
-  // ── upload form state (one file per type)
-  // { id_proof: File|null, medical_report: File|null, ... }
-  const initialFiles = () =>
-    Object.fromEntries(REQUIRED_DOC_TYPES.map(({ type }) => [type, null]));
-
-  const [files,         setFiles]         = useState(initialFiles);
+  // ── upload form state (dynamic by doc type)
+  const [files,         setFiles]         = useState({});
   const [submitting,    setSubmitting]    = useState(false);
   const [uploadStep,    setUploadStep]    = useState(''); // progress message
   const [submitError,   setSubmitError]   = useState('');
@@ -62,6 +78,15 @@ export default function ClientPolicyDetail() {
   const [showSubmittedDocs, setShowSubmittedDocs] = useState(false);
 
   const fileInputRefs = useRef({}); // { [type]: HTMLInputElement }
+
+  // ── derive effective required docs (configured rows or default fallback)
+  const effectiveDocs = requiredDocs.length > 0
+    ? requiredDocs.map((d) => ({
+        type: d.document_type,
+        label: d.label || formatDocTypeLabel(d.document_type),
+        hint: PRESET_HINTS[d.document_type] || `Please upload a clear copy of your ${d.label || formatDocTypeLabel(d.document_type)}.`,
+      }))
+    : REQUIRED_DOC_TYPES;
 
   // ── fetch eligibility result whenever submission has an AI verdict
   useEffect(() => {
@@ -101,12 +126,21 @@ export default function ClientPolicyDetail() {
         // Fetch the published policy
         const { data: pol, error: polErr } = await supabase
           .from('policies')
-          .select('*')
+          .select('*, policy_categories(*)')
           .eq('id', policyId)
           .eq('status', 'published')
           .single();
         if (polErr) throw polErr;
         setPolicy(pol);
+
+        // Fetch required documents configured for this policy
+        try {
+          const reqDocs = await fetchPolicyRequiredDocuments(policyId);
+          setRequiredDocs(reqDocs || []);
+        } catch (docErr) {
+          console.error('Failed to load required documents:', docErr);
+          setRequiredDocs([]);
+        }
 
         // Check for the most recent submission by this client for this policy
         const existing = await fetchLatestSubmissionForPolicy(policyId, user.id);
@@ -149,10 +183,14 @@ export default function ClientPolicyDetail() {
   }
 
   function clearFile(type) {
-    setFiles((prev) => ({ ...prev, [type]: null }));
+    setFiles((prev) => {
+      const next = { ...prev };
+      delete next[type];
+      return next;
+    });
   }
 
-  const allSelected = REQUIRED_DOC_TYPES.every(({ type }) => files[type] !== null);
+  const allSelected = effectiveDocs.length > 0 && effectiveDocs.every(({ type }) => !!files[type]);
 
   // ── view submitted document in browser
   async function handleViewSubmissionDoc(doc) {
@@ -188,9 +226,9 @@ export default function ClientPolicyDetail() {
 
     // Upload each document
     const uploadedDocs = [];
-    for (let i = 0; i < REQUIRED_DOC_TYPES.length; i++) {
-      const { type, label } = REQUIRED_DOC_TYPES[i];
-      setUploadStep(`Uploading ${i + 1}/${REQUIRED_DOC_TYPES.length}: ${label}…`);
+    for (let i = 0; i < effectiveDocs.length; i++) {
+      const { type, label } = effectiveDocs[i];
+      setUploadStep(`Uploading ${i + 1}/${effectiveDocs.length}: ${label}…`);
       try {
         const docRecord = await uploadSubmissionDocument(newSubmission.id, files[type], type);
         uploadedDocs.push(docRecord);
@@ -203,7 +241,7 @@ export default function ClientPolicyDetail() {
     }
 
     // Reset file selections
-    setFiles(initialFiles());
+    setFiles({});
     if (fileInputRefs.current) {
       Object.values(fileInputRefs.current).forEach((input) => {
         if (input) input.value = '';
@@ -364,7 +402,7 @@ export default function ClientPolicyDetail() {
                     )}
                   </div>
                   <span className={`badge-category badge-category-${policy.category}`}>
-                    {policy.category}
+                    {policy.policy_categories?.name || policy.category}
                   </span>
                 </div>
               </div>
@@ -444,7 +482,9 @@ export default function ClientPolicyDetail() {
                           {submission.submission_documents?.length > 0 && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {submission.submission_documents.map((doc) => {
-                                const meta = REQUIRED_DOC_TYPES.find((d) => d.type === doc.document_type);
+                                const meta = effectiveDocs.find((d) => d.type === doc.document_type) ||
+                                  REQUIRED_DOC_TYPES.find((d) => d.type === doc.document_type);
+                                const docLabel = meta?.label || formatDocTypeLabel(doc.document_type);
                                 return (
                                   <div key={doc.id} className="doc-row-existing">
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
@@ -458,7 +498,7 @@ export default function ClientPolicyDetail() {
                                         <div className="doc-row-size">{formatFileSize(doc.file_size)}</div>
                                       </div>
                                     </div>
-                                    <span className="doc-row-type">{meta?.label ?? doc.document_type}</span>
+                                    <span className="doc-row-type">{docLabel}</span>
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
@@ -531,7 +571,7 @@ export default function ClientPolicyDetail() {
                               : 'Apply for this Policy'}
                           </h2>
                           <p className="card-subtitle">
-                            Upload one file for each required document type. All four are required.
+                            Upload one file for each required document type. {effectiveDocs.length === 1 ? '1 document is required.' : `All ${effectiveDocs.length} are required.`}
                           </p>
                         </div>
                       </div>
@@ -548,7 +588,7 @@ export default function ClientPolicyDetail() {
 
                     <form onSubmit={handleSubmit}>
                       <div className="upload-checklist">
-                        {REQUIRED_DOC_TYPES.map(({ type, label, hint }) => {
+                        {effectiveDocs.map(({ type, label, hint }) => {
                           const selectedFile = files[type];
                           return (
                             <div

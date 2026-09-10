@@ -26,6 +26,10 @@ const DOC_TYPE_LABELS = {
   medical_report: 'Recent Medical Report',
   income_proof: 'Income Proof',
   age_proof: 'Age Proof',
+  vehicle_rc: 'Vehicle Registration (RC)',
+  driving_license: 'Driving License',
+  address_proof: 'Proof of Address',
+  property_deed: 'Property Deed / Title Document',
 };
 
 /**
@@ -639,7 +643,7 @@ export default function EligibilityResultCard({
                       </div>
 
                       <span className="doc-row-type">
-                        {DOC_TYPE_LABELS[doc.document_type] || doc.document_type}
+                        {DOC_TYPE_LABELS[doc.document_type] || doc.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
                       </span>
 
                       {onViewDoc && (
