@@ -10,6 +10,7 @@ import ClientPolicies from './pages/client/ClientPolicies';
 import ClientPolicyDetail from './pages/client/ClientPolicyDetail';
 import ClientSubmissions from './pages/client/ClientSubmissions';
 import ClientSubmissionDetail from './pages/client/ClientSubmissionDetail';
+import ClientCurrentPolicies from './pages/client/ClientCurrentPolicies';
 import ClientAdvisor from './pages/client/ClientAdvisor';
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -34,6 +35,8 @@ export default function App() {
       <Route element={<ProtectedRoute allowedRoles={['client']} />}>
         <Route path="/client/policies"          element={<ClientPolicies />} />
         <Route path="/client/policies/:id"      element={<ClientPolicyDetail />} />
+        <Route path="/client/current-policies"  element={<ClientCurrentPolicies />} />
+        <Route path="/client/my-policies"       element={<ClientCurrentPolicies />} />
         <Route path="/client/submissions"       element={<ClientSubmissions />} />
         <Route path="/client/submissions/:id"   element={<ClientSubmissionDetail />} />
         <Route path="/client/advisor"           element={<ClientAdvisor />} />

@@ -122,6 +122,64 @@ export async function fetchAllSubmissionsForPolicyByClient(policyId, clientId) {
   return data || [];
 }
 
+/**
+ * Fetch all policies for which the client is approved / has active coverage.
+ * Deduplicates by policy_id to take the latest approved submission.
+ */
+export async function fetchClientApprovedPolicies(clientId) {
+  const { data, error } = await supabase
+    .from('client_submissions')
+    .select(`
+      id,
+      policy_id,
+      client_id,
+      status,
+      submitted_at,
+      updated_at,
+      policies (
+        id,
+        name,
+        category,
+        category_id,
+        description,
+        status,
+        policy_categories ( id, name, description )
+      ),
+      submission_documents (
+        id,
+        document_type,
+        filename,
+        file_size,
+        file_path,
+        uploaded_at
+      )
+    `)
+    .eq('client_id', clientId)
+    .in('status', ['approved', 'eligible'])
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching client approved policies:', error);
+    throw error;
+  }
+
+  // Deduplicate by policy_id keeping the latest approved submission
+  const seenPolicies = new Set();
+  const approvedList = [];
+
+  for (const sub of data || []) {
+    if (!sub.policy_id || seenPolicies.has(sub.policy_id)) continue;
+    seenPolicies.add(sub.policy_id);
+    approvedList.push({
+      ...sub,
+      policy: sub.policies,
+      documents: sub.submission_documents || [],
+    });
+  }
+
+  return approvedList;
+}
+
 // ── Mutations ────────────────────────────────────────────────────────────────
 
 /**
