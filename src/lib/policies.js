@@ -141,6 +141,28 @@ export async function createPolicyCategory({ name, description }) {
 }
 
 /**
+ * Triggers background embedding generation for a policy.
+ * Called automatically when a policy is published or its eligibility documents are modified.
+ * Non-blocking: failures are logged and will not break UI transactions.
+ */
+export async function triggerPolicyEmbeddingGeneration(policyId) {
+  if (!policyId) return;
+  try {
+    const { data, error } = await supabase.functions.invoke('generate-policy-embedding', {
+      body: { policy_id: policyId },
+    });
+    if (error) {
+      console.warn(`[triggerPolicyEmbeddingGeneration] Edge function returned error for ${policyId}:`, error);
+    } else {
+      console.log(`[triggerPolicyEmbeddingGeneration] Successfully generated embedding for ${policyId}:`, data);
+    }
+    return data;
+  } catch (err) {
+    console.warn(`[triggerPolicyEmbeddingGeneration] Exception triggering embedding for ${policyId}:`, err);
+  }
+}
+
+/**
  * Create a new policy.
  */
 export async function createPolicy({ name, description, category_id, category, status, created_by }) {
@@ -169,6 +191,10 @@ export async function createPolicy({ name, description, category_id, category, s
     throw error;
   }
 
+  if (data?.id && data.status === 'published') {
+    triggerPolicyEmbeddingGeneration(data.id);
+  }
+
   return data;
 }
 
@@ -189,6 +215,11 @@ export async function updatePolicy(id, updates) {
   if (error) {
     console.error('Error updating policy:', error);
     throw error;
+  }
+
+  // Automatically regenerate policy embedding if published or newly published
+  if (data?.id && (updates.status === 'published' || data.status === 'published')) {
+    triggerPolicyEmbeddingGeneration(data.id);
   }
 
   return data;
@@ -371,13 +402,30 @@ export async function uploadPolicyDocument(policyId, file, documentType) {
     throw insertError;
   }
 
+  // Automatically refresh policy embedding when documents are uploaded
+  triggerPolicyEmbeddingGeneration(policyId);
+
   return data;
 }
 
 /**
  * Delete a policy document from storage and the database.
  */
-export async function deletePolicyDocument(documentId, filePath) {
+export async function deletePolicyDocument(documentId, filePath, policyId = null) {
+  let targetPolicyId = policyId;
+  if (!targetPolicyId && documentId) {
+    try {
+      const { data: docRecord } = await supabase
+        .from('policy_documents')
+        .select('policy_id')
+        .eq('id', documentId)
+        .single();
+      targetPolicyId = docRecord?.policy_id;
+    } catch {
+      // Ignore lookup failure
+    }
+  }
+
   // 1. Remove from storage (strictly verify deletion)
   if (filePath) {
     const { data, error: storageError } = await supabase.storage
@@ -399,6 +447,11 @@ export async function deletePolicyDocument(documentId, filePath) {
   if (error) {
     console.error('Error deleting document record:', error);
     throw error;
+  }
+
+  // Automatically refresh policy embedding after document deletion
+  if (targetPolicyId) {
+    triggerPolicyEmbeddingGeneration(targetPolicyId);
   }
 
   return true;
