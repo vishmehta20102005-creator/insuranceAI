@@ -47,18 +47,39 @@ export default function ClientSubmissions() {
     navigate('/login', { replace: true });
   }
 
-  // Summary counts
+  // Group submissions by policy_id to determine each policy's current latest standing
+  // (submissions are returned sorted by submitted_at DESC)
+  const latestSubmissionByPolicy = {};
+  submissions.forEach((sub) => {
+    if (!latestSubmissionByPolicy[sub.policy_id]) {
+      latestSubmissionByPolicy[sub.policy_id] = sub;
+    }
+  });
+
+  const latestList = Object.values(latestSubmissionByPolicy);
+
+  // Summary counts based on current active policy standing
   const totalCount    = submissions.length;
-  const approvedCount = submissions.filter((s) => ['approved', 'eligible'].includes(s.status)).length;
-  const pendingCount  = submissions.filter((s) => ['pending', 'processing'].includes(s.status)).length;
-  const actionCount   = submissions.filter((s) => ['needs_review', 'not_eligible', 'rejected'].includes(s.status)).length;
+  const approvedCount = latestList.filter((s) => ['approved', 'eligible'].includes(s.status)).length;
+  const pendingCount  = latestList.filter((s) => ['pending', 'processing'].includes(s.status)).length;
+  const actionCount   = latestList.filter((s) => ['needs_review', 'not_eligible', 'rejected'].includes(s.status)).length;
 
   // Filtered submissions
   const filteredSubmissions = submissions.filter((sub) => {
+    const latestForThisPolicy = latestSubmissionByPolicy[sub.policy_id];
+    const isLatest = latestForThisPolicy?.id === sub.id;
+    const policyApproved = ['approved', 'eligible'].includes(latestForThisPolicy?.status);
+    const policyInReview = ['pending', 'processing'].includes(latestForThisPolicy?.status);
+
     // Tab filter
     if (filterTab === 'approved' && !['approved', 'eligible'].includes(sub.status)) return false;
     if (filterTab === 'pending' && !['pending', 'processing'].includes(sub.status)) return false;
-    if (filterTab === 'action' && !['needs_review', 'not_eligible', 'rejected'].includes(sub.status)) return false;
+    if (filterTab === 'action') {
+      // ONLY show submissions where action is currently needed (ignore superseded older attempts)
+      if (!isLatest || policyApproved || policyInReview || !['needs_review', 'not_eligible', 'rejected'].includes(sub.status)) {
+        return false;
+      }
+    }
 
     // Search filter
     if (searchTerm.trim()) {
@@ -150,7 +171,7 @@ export default function ClientSubmissions() {
           )}
 
           {/* Metric Summary Cards */}
-          <div className="stat-cards-grid" style={{ marginBottom: '28px' }}>
+          <div className="stats-grid" style={{ marginBottom: '28px' }}>
             <div className="card stat-card">
               <div className="stat-card-inner">
                 <div>
@@ -164,6 +185,7 @@ export default function ClientSubmissions() {
                   </svg>
                 </div>
               </div>
+              <div className="stat-note">Across {latestList.length} {latestList.length === 1 ? 'policy' : 'policies'}</div>
             </div>
 
             <div className="card stat-card">
@@ -178,6 +200,7 @@ export default function ClientSubmissions() {
                   </svg>
                 </div>
               </div>
+              <div className="stat-note">Active coverage confirmed</div>
             </div>
 
             <div className="card stat-card">
@@ -193,6 +216,7 @@ export default function ClientSubmissions() {
                   </svg>
                 </div>
               </div>
+              <div className="stat-note">In underwriting evaluation</div>
             </div>
 
             <div className="card stat-card">
@@ -203,7 +227,7 @@ export default function ClientSubmissions() {
                     {actionCount}
                   </div>
                 </div>
-                <div className="stat-icon-wrapper" style={{ background: 'rgba(220, 38, 38, 0.1)', color: 'var(--color-error, #dc2626)' }}>
+                <div className="stat-icon-wrapper" style={{ background: actionCount > 0 ? 'rgba(220, 38, 38, 0.1)' : 'var(--color-surface-sunken)', color: actionCount > 0 ? 'var(--color-error, #dc2626)' : 'var(--color-text-muted)' }}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="8" x2="12" y2="12" />
@@ -211,6 +235,7 @@ export default function ClientSubmissions() {
                   </svg>
                 </div>
               </div>
+              <div className="stat-note">{actionCount === 0 ? 'All applications up to date' : 'Document updates needed'}</div>
             </div>
           </div>
 
@@ -276,60 +301,88 @@ export default function ClientSubmissions() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSubmissions.map((sub) => (
-                      <tr key={sub.id}>
-                        <td>
-                          <div className="policy-name-cell">
-                            <span className="policy-title">{sub.policy?.name ?? '—'}</span>
-                          </div>
-                        </td>
+                    {filteredSubmissions.map((sub) => {
+                      const latestForThisPolicy = latestSubmissionByPolicy[sub.policy_id];
+                      const isLatest = latestForThisPolicy?.id === sub.id;
+                      const policyApproved = ['approved', 'eligible'].includes(latestForThisPolicy?.status);
+                      const policyInReview = ['pending', 'processing'].includes(latestForThisPolicy?.status);
 
-                        <td>
-                          {sub.policy?.category && (
-                            <span className={`badge-category badge-category-${sub.policy.category}`}>
-                              {sub.policy.category}
+                      // Can this submission prompt Reapply?
+                      // Strictly ONLY if it is the latest submission for this policy, the policy is NOT approved,
+                      // NOT in review, and its status is rejected/not_eligible/needs_review.
+                      const canReapply = isLatest && !policyApproved && !policyInReview && ['rejected', 'not_eligible', 'needs_review'].includes(sub.status);
+
+                      return (
+                        <tr
+                          key={sub.id}
+                          style={{
+                            opacity: !isLatest && policyApproved ? 0.8 : 1,
+                          }}
+                        >
+                          <td>
+                            <div className="policy-name-cell">
+                              <span className="policy-title">{sub.policy?.name ?? '—'}</span>
+                            </div>
+                          </td>
+
+                          <td>
+                            {sub.policy?.category && (
+                              <span className={`badge-category badge-category-${sub.policy.category}`}>
+                                {sub.policy.category}
+                              </span>
+                            )}
+                          </td>
+
+                          <td>
+                            <span className="doc-count-pill">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                              </svg>
+                              {sub.docsCount} {sub.docsCount === 1 ? 'doc' : 'docs'}
                             </span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td>
-                          <span className="doc-count-pill">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                              <polyline points="14 2 14 8 20 8" />
-                            </svg>
-                            {sub.docsCount} {sub.docsCount === 1 ? 'doc' : 'docs'}
-                          </span>
-                        </td>
+                          <td>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <SubmissionStatusBadge status={sub.status} />
+                              {!isLatest && (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    background: policyApproved ? 'rgba(22, 163, 74, 0.08)' : 'var(--color-surface-sunken)',
+                                    color: policyApproved ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
+                                    border: '1px solid ' + (policyApproved ? 'rgba(22, 163, 74, 0.2)' : 'var(--color-border)'),
+                                  }}
+                                >
+                                  {policyApproved ? 'Resolved (Approved)' : 'Previous Attempt'}
+                                </span>
+                              )}
+                            </div>
+                          </td>
 
-                        <td>
-                          <SubmissionStatusBadge status={sub.status} />
-                        </td>
+                          <td className="cell-muted">
+                            {new Date(sub.submitted_at).toLocaleDateString(undefined, {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
+                          </td>
 
-                        <td className="cell-muted">
-                          {new Date(sub.submitted_at).toLocaleDateString(undefined, {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
-                        </td>
-
-                        <td style={{ textAlign: 'right' }}>
-                          <Link
-                            to={`/client/policies/${sub.policy_id}`}
-                            className={`btn btn-sm ${
-                              ['rejected', 'not_eligible', 'needs_review'].includes(sub.status)
-                                ? 'btn-primary'
-                                : 'btn-ghost'
-                            }`}
-                          >
-                            {['rejected', 'not_eligible', 'needs_review'].includes(sub.status)
-                              ? 'Reapply'
-                              : 'View Details'}
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                          <td style={{ textAlign: 'right' }}>
+                            <Link
+                              to={`/client/policies/${sub.policy_id}`}
+                              className={`btn btn-sm ${canReapply ? 'btn-primary' : 'btn-ghost'}`}
+                            >
+                              {canReapply ? 'Reapply' : 'View Details'}
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
