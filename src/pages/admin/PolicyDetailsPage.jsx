@@ -8,9 +8,28 @@ import {
   uploadPolicyDocument,
   deletePolicyDocument,
   getDocumentSignedUrl,
+  fetchPolicyCategories,
+  createPolicyCategory,
+  fetchPolicyRequiredDocuments,
+  addPolicyRequiredDocument,
+  updatePolicyRequiredDocument,
+  deletePolicyRequiredDocument,
+  reorderPolicyRequiredDocuments,
 } from '../../lib/policies';
 import { fetchSubmissionsForPolicyAdmin } from '../../lib/submissions';
 import ReviewSubmissionModal from '../../components/admin/ReviewSubmissionModal';
+
+const PRESET_REQUIRED_DOCS = [
+  { key: 'vehicle_rc', label: 'Vehicle Registration Certificate (RC)' },
+  { key: 'driving_license', label: 'Valid Driving License' },
+  { key: 'vehicle_photos', label: 'Vehicle Inspection Photographs' },
+  { key: 'id_proof', label: 'Government Photo ID' },
+  { key: 'income_proof', label: 'Income Proof / Salary Slip' },
+  { key: 'medical_report', label: 'Recent Medical Examination Report' },
+  { key: 'age_proof', label: 'Age Proof Certificate' },
+  { key: 'previous_policy', label: 'Previous Insurance Policy Copy' },
+  { key: 'address_proof', label: 'Proof of Permanent Address' },
+];
 
 function SubmissionStatusBadge({ status }) {
   const cfg = {
@@ -46,6 +65,28 @@ export default function PolicyDetailsPage() {
   const [description, setDescription] = useState('');
   const [savingPolicy, setSavingPolicy] = useState(false);
 
+  // Category state
+  const [categories, setCategories] = useState([]);
+  const [categoryId, setCategoryId] = useState('');
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
+
+  // Required documents state
+  const [requiredDocs, setRequiredDocs] = useState([]);
+  const [loadingReqDocs, setLoadingReqDocs] = useState(false);
+  const [isReqDocModalOpen, setIsReqDocModalOpen] = useState(false);
+  const [editingReqDoc, setEditingReqDoc] = useState(null);
+  const [docTypeKey, setDocTypeKey] = useState('');
+  const [docLabel, setDocLabel] = useState('');
+  const [docOrder, setDocOrder] = useState(1);
+  const [savingReqDoc, setSavingReqDoc] = useState(false);
+  const [reqDocError, setReqDocError] = useState('');
+  const [deletingReqDocId, setDeletingReqDocId] = useState(null);
+  const [confirmingReqDocId, setConfirmingReqDocId] = useState(null);
+
   // Staged files for upload
   const [stagedFiles, setStagedFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -64,13 +105,18 @@ export default function PolicyDetailsPage() {
     setLoading(true);
     setError('');
     try {
-      const [data, subsData] = await Promise.all([
+      const [data, subsData, catsData, reqDocsData] = await Promise.all([
         fetchPolicyById(id),
         fetchSubmissionsForPolicyAdmin(id),
+        fetchPolicyCategories(),
+        fetchPolicyRequiredDocuments(id),
       ]);
       setPolicy(data);
       setSubmissions(subsData || []);
+      setCategories(catsData || []);
+      setRequiredDocs(reqDocsData || []);
       setName(data.name || '');
+      setCategoryId(data.category_id || (catsData && catsData.length > 0 ? catsData[0].id : ''));
       setCategory(data.category || 'health');
       setStatus(data.status || 'draft');
       setDescription(data.description || '');
@@ -78,6 +124,32 @@ export default function PolicyDetailsPage() {
       setError(err.message || 'Failed to load policy.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCreateCategoryInline(e) {
+    if (e) e.preventDefault();
+    setCategoryError('');
+    if (!newCatName.trim()) {
+      setCategoryError('Category name is required.');
+      return;
+    }
+    setSavingCategory(true);
+    try {
+      const created = await createPolicyCategory({
+        name: newCatName.trim(),
+        description: newCatDesc.trim() || null,
+      });
+      setNewCatName('');
+      setNewCatDesc('');
+      setIsCreatingCategory(false);
+      const allCats = await fetchPolicyCategories();
+      setCategories(allCats);
+      setCategoryId(created.id);
+    } catch (err) {
+      setCategoryError(err.message || 'Failed to create category.');
+    } finally {
+      setSavingCategory(false);
     }
   }
 
@@ -100,9 +172,11 @@ export default function PolicyDetailsPage() {
     setSaveSuccess(false);
 
     try {
+      const matchedCat = categories.find((c) => c.id === categoryId);
       const updated = await updatePolicy(id, {
         name: name.trim(),
-        category,
+        category_id: categoryId || null,
+        category: matchedCat ? matchedCat.name : category,
         status,
         description: description.trim() || null,
       });
@@ -113,6 +187,148 @@ export default function PolicyDetailsPage() {
       setError(err.message || 'Failed to update policy.');
     } finally {
       setSavingPolicy(false);
+    }
+  }
+
+  function openAddReqDocModal() {
+    setEditingReqDoc(null);
+    setDocTypeKey('');
+    setDocLabel('');
+    setDocOrder(requiredDocs.length + 1);
+    setReqDocError('');
+    setIsReqDocModalOpen(true);
+  }
+
+  function openEditReqDocModal(doc) {
+    setEditingReqDoc(doc);
+    setDocTypeKey(doc.document_type);
+    setDocLabel(doc.label);
+    setDocOrder(doc.display_order || 1);
+    setReqDocError('');
+    setIsReqDocModalOpen(true);
+  }
+
+  function handleSelectPresetDoc(preset) {
+    setDocTypeKey(preset.key);
+    setDocLabel(preset.label);
+    setReqDocError('');
+  }
+
+  async function handleSaveReqDoc(e) {
+    if (e) e.preventDefault();
+    setReqDocError('');
+
+    if (!docLabel.trim()) {
+      setReqDocError('Document display label is required.');
+      return;
+    }
+
+    const cleanKey = docTypeKey
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    if (!cleanKey) {
+      setReqDocError('Machine-readable document type key is required.');
+      return;
+    }
+
+    // Check duplicate key
+    const isDuplicate = requiredDocs.some(
+      (d) => d.document_type === cleanKey && (!editingReqDoc || d.id !== editingReqDoc.id)
+    );
+    if (isDuplicate) {
+      setReqDocError(`Document type key "${cleanKey}" already exists for this policy.`);
+      return;
+    }
+
+    setSavingReqDoc(true);
+    try {
+      if (editingReqDoc) {
+        const updated = await updatePolicyRequiredDocument(editingReqDoc.id, {
+          document_type: cleanKey,
+          label: docLabel.trim(),
+          display_order: Number(docOrder) || 1,
+        });
+        setRequiredDocs((prev) =>
+          prev.map((d) => (d.id === editingReqDoc.id ? updated : d)).sort((a, b) => a.display_order - b.display_order)
+        );
+      } else {
+        const created = await addPolicyRequiredDocument(id, {
+          document_type: cleanKey,
+          label: docLabel.trim(),
+          display_order: Number(docOrder) || requiredDocs.length + 1,
+        });
+        setRequiredDocs((prev) => [...prev, created].sort((a, b) => a.display_order - b.display_order));
+      }
+      setIsReqDocModalOpen(false);
+    } catch (err) {
+      setReqDocError(err.message || 'Failed to save required document.');
+    } finally {
+      setSavingReqDoc(false);
+    }
+  }
+
+  async function handleDeleteReqDoc(docId) {
+    setDeletingReqDocId(docId);
+    try {
+      await deletePolicyRequiredDocument(docId);
+      const remaining = requiredDocs.filter((d) => d.id !== docId);
+      setRequiredDocs(remaining);
+      setConfirmingReqDocId(null);
+      await reorderPolicyRequiredDocuments(remaining);
+    } catch (err) {
+      alert('Failed to delete required document: ' + err.message);
+    } finally {
+      setDeletingReqDocId(null);
+    }
+  }
+
+  async function handleMoveReqDoc(index, direction) {
+    const targetIdx = direction === 'up' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= requiredDocs.length) return;
+
+    const newDocs = [...requiredDocs];
+    const temp = newDocs[index];
+    newDocs[index] = newDocs[targetIdx];
+    newDocs[targetIdx] = temp;
+
+    const reordered = newDocs.map((doc, idx) => ({ ...doc, display_order: idx + 1 }));
+    setRequiredDocs(reordered);
+
+    try {
+      await reorderPolicyRequiredDocuments(reordered);
+    } catch (err) {
+      console.error('Failed to save reordered documents:', err);
+    }
+  }
+
+  async function handlePopulateStandardDefaults() {
+    if (!window.confirm('Add the 4 standard insurance documents (ID, Medical, Income, Age Proof) to this policy?')) {
+      return;
+    }
+    setLoadingReqDocs(true);
+    try {
+      const standard = [
+        { document_type: 'id_proof', label: 'Government Photo ID', display_order: 1 },
+        { document_type: 'medical_report', label: 'Recent Medical Report', display_order: 2 },
+        { document_type: 'income_proof', label: 'Income Proof / Salary Slip', display_order: 3 },
+        { document_type: 'age_proof', label: 'Age Proof Certificate', display_order: 4 },
+      ];
+
+      for (const item of standard) {
+        if (!requiredDocs.some((d) => d.document_type === item.document_type)) {
+          await addPolicyRequiredDocument(id, item);
+        }
+      }
+
+      const refreshed = await fetchPolicyRequiredDocuments(id);
+      setRequiredDocs(refreshed);
+    } catch (err) {
+      alert('Failed to populate default documents: ' + err.message);
+    } finally {
+      setLoadingReqDocs(false);
     }
   }
 
@@ -312,7 +528,7 @@ export default function PolicyDetailsPage() {
                   {policy.status === 'published' ? '● Published' : '○ Draft'}
                 </span>
                 <span className={`badge-category badge-category-${policy.category}`}>
-                  {policy.category}
+                  {categories.find((c) => c.id === (policy.category_id || categoryId))?.name || policy.category}
                 </span>
               </div>
             </div>
@@ -331,19 +547,85 @@ export default function PolicyDetailsPage() {
                 </div>
 
                 <div className="form-group flex-1">
-                  <label htmlFor="edit-category">Category</label>
-                  <select
-                    id="edit-category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="form-select"
-                  >
-                    <option value="health">Health Insurance</option>
-                    <option value="life">Life Insurance</option>
-                    <option value="vehicle">Vehicle Insurance</option>
-                    <option value="travel">Travel Insurance</option>
-                    <option value="other">Other</option>
-                  </select>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label htmlFor="edit-category" style={{ margin: 0 }}>Category</label>
+                    {!isCreatingCategory && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCreatingCategory(true)}
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: '11px', padding: '2px 6px', height: 'auto' }}
+                      >
+                        + New
+                      </button>
+                    )}
+                  </div>
+                  {!isCreatingCategory ? (
+                    <select
+                      id="edit-category"
+                      value={categoryId}
+                      onChange={(e) => {
+                        if (e.target.value === '__create_new__') {
+                          setIsCreatingCategory(true);
+                        } else {
+                          setCategoryId(e.target.value);
+                        }
+                      }}
+                      className="form-select"
+                    >
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                      <option value="__create_new__">+ Create New Category...</option>
+                    </select>
+                  ) : (
+                    <div style={{
+                      padding: '8px',
+                      background: 'var(--color-surface-sunken)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '6px',
+                      marginTop: '4px'
+                    }}>
+                      {categoryError && (
+                        <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginBottom: '4px' }}>
+                          {categoryError}
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="Category name"
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        style={{ width: '100%', marginBottom: '4px', padding: '4px 6px', fontSize: '12px' }}
+                        autoFocus
+                      />
+                      <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setIsCreatingCategory(false);
+                            setCategoryError('');
+                          }}
+                          disabled={savingCategory}
+                          style={{ fontSize: '11px', padding: '2px 6px' }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={handleCreateCategoryInline}
+                          disabled={savingCategory || !newCatName.trim()}
+                          style={{ fontSize: '11px', padding: '2px 6px' }}
+                        >
+                          {savingCategory ? 'Saving...' : 'Add'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-group flex-1">
@@ -393,6 +675,160 @@ export default function PolicyDetailsPage() {
                 </button>
               </div>
             </form>
+          </div>
+
+          {/* ── Required Application Documents Card ── */}
+          <div className="card" style={{ marginBottom: '28px' }}>
+            <div className="card-header">
+              <div>
+                <h2>Required Application Documents</h2>
+                <p className="card-subtitle">
+                  Configure what documents applicants must upload when applying for this specific policy.
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span className="doc-count-badge">
+                  {requiredDocs.length} {requiredDocs.length === 1 ? 'Required Doc' : 'Required Docs'}
+                </span>
+                <button
+                  type="button"
+                  onClick={openAddReqDocModal}
+                  className="btn btn-primary btn-sm"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  <span>Add Document Requirement</span>
+                </button>
+              </div>
+            </div>
+
+            {requiredDocs.length === 0 ? (
+              <div style={{
+                padding: '36px 20px',
+                textAlign: 'center',
+                background: 'var(--color-surface-sunken)',
+                borderRadius: '8px',
+                border: '1px dashed var(--color-border)',
+                margin: '16px 0'
+              }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>📋</div>
+                <h4 style={{ margin: '0 0 6px' }}>No required documents configured</h4>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', maxWidth: '460px', margin: '0 auto 16px' }}>
+                  Applicants currently won't have a required checklist for this policy. Add custom document requirements or load standard defaults.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={openAddReqDocModal}
+                    className="btn btn-primary btn-sm"
+                  >
+                    + Add Custom Requirement
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePopulateStandardDefaults}
+                    className="btn btn-secondary btn-sm"
+                    disabled={loadingReqDocs}
+                  >
+                    Load Standard 4 Documents (Health/Life)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="req-docs-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '60px', textAlign: 'center' }}>Order</th>
+                      <th>Document Display Label</th>
+                      <th>Machine Key</th>
+                      <th style={{ width: '100px', textAlign: 'center' }}>Reorder</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requiredDocs.map((doc, idx) => (
+                      <tr key={doc.id} className="req-doc-row">
+                        <td style={{ textAlign: 'center' }}>
+                          <span className="req-doc-order-badge">{idx + 1}</span>
+                        </td>
+                        <td>
+                          <strong style={{ fontSize: '14px', color: 'var(--color-text)' }}>
+                            {doc.label}
+                          </strong>
+                        </td>
+                        <td>
+                          <span className="req-doc-key-code">{doc.document_type}</span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div className="reorder-btn-group">
+                            <button
+                              type="button"
+                              className="reorder-btn"
+                              onClick={() => handleMoveReqDoc(idx, 'up')}
+                              disabled={idx === 0}
+                              title="Move up in checklist"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              className="reorder-btn"
+                              onClick={() => handleMoveReqDoc(idx, 'down')}
+                              disabled={idx === requiredDocs.length - 1}
+                              title="Move down in checklist"
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div className="table-row-actions">
+                            <button
+                              type="button"
+                              onClick={() => openEditReqDocModal(doc)}
+                              className="btn btn-ghost btn-sm"
+                            >
+                              Edit
+                            </button>
+                            {confirmingReqDocId === doc.id ? (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteReqDoc(doc.id)}
+                                  className="btn btn-danger btn-sm"
+                                  disabled={deletingReqDocId === doc.id}
+                                >
+                                  {deletingReqDocId === doc.id ? 'Deleting...' : 'Confirm'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingReqDocId(null)}
+                                  className="btn btn-ghost btn-sm"
+                                  disabled={deletingReqDocId === doc.id}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingReqDocId(doc.id)}
+                                className="btn btn-danger-ghost btn-sm"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Policy Documents Section */}
@@ -681,6 +1117,123 @@ export default function PolicyDetailsPage() {
 
         </div>
       </main>
+
+      {/* ── Add / Edit Required Document Modal ── */}
+      {isReqDocModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsReqDocModalOpen(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
+            <div className="modal-header">
+              <h2>{editingReqDoc ? 'Edit Required Document' : 'Add Required Application Document'}</h2>
+              <button
+                className="modal-close-btn"
+                onClick={() => setIsReqDocModalOpen(false)}
+                aria-label="Close modal"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReqDoc} className="modal-form">
+              {reqDocError && (
+                <div className="form-error" role="alert">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  {reqDocError}
+                </div>
+              )}
+
+              {!editingReqDoc && (
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px', display: 'block' }}>
+                    Quick Presets (click to autofill):
+                  </label>
+                  <div className="req-doc-preset-chips">
+                    {PRESET_REQUIRED_DOCS.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        className="req-doc-preset-chip"
+                        onClick={() => handleSelectPresetDoc(p)}
+                      >
+                        <span>{p.label}</span>
+                        <code style={{ fontSize: '10px', opacity: 0.75 }}>({p.key})</code>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="req-doc-label">Display Label (shown to applicants) *</label>
+                <input
+                  id="req-doc-label"
+                  type="text"
+                  placeholder="e.g. Vehicle Registration Certificate (RC) or Driving License"
+                  value={docLabel}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDocLabel(val);
+                    if (!editingReqDoc && (!docTypeKey || docTypeKey === docLabel.toLowerCase().replace(/[^a-z0-9_]/g, '_'))) {
+                      setDocTypeKey(val.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^_+|_+$/g, ''));
+                    }
+                  }}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group flex-2">
+                  <label htmlFor="req-doc-key">Machine Key (system identifier) *</label>
+                  <input
+                    id="req-doc-key"
+                    type="text"
+                    placeholder="e.g. vehicle_rc, driving_license"
+                    value={docTypeKey}
+                    onChange={(e) => setDocTypeKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                    required
+                  />
+                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '3px', display: 'block' }}>
+                    Alphanumeric and underscores only (e.g. <code>vehicle_rc</code>).
+                  </span>
+                </div>
+
+                <div className="form-group flex-1">
+                  <label htmlFor="req-doc-order">Display Order</label>
+                  <input
+                    id="req-doc-order"
+                    type="number"
+                    min="1"
+                    value={docOrder}
+                    onChange={(e) => setDocOrder(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setIsReqDocModalOpen(false)}
+                  disabled={savingReqDoc}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingReqDoc}
+                >
+                  {savingReqDoc ? <span className="btn-spinner" /> : null}
+                  {savingReqDoc ? 'Saving...' : editingReqDoc ? 'Update Requirement' : 'Add Requirement'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Review Submission Modal */}
       <ReviewSubmissionModal

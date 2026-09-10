@@ -128,7 +128,7 @@ export default function AdminDashboard() {
       searchTerm.trim() === '' ||
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (p.description && p.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      p.category.toLowerCase().includes(searchTerm.toLowerCase());
+      (p.category || '').toLowerCase().includes(searchTerm.toLowerCase());
     return matchesStatus && matchesSearch;
   });
 

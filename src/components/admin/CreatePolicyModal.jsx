@@ -1,17 +1,74 @@
-import { useState } from 'react';
-import { createPolicy } from '../../lib/policies';
+import { useState, useEffect } from 'react';
+import { createPolicy, fetchPolicyCategories, createPolicyCategory } from '../../lib/policies';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) {
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('health');
   const [status, setStatus] = useState('draft');
+  const [categories, setCategories] = useState([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [loadingCategories, setLoadingCategories] = useState(false);
+
+  // Inline category creation state
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryError, setCategoryError] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      loadCategories();
+    }
+  }, [isOpen]);
+
+  async function loadCategories(selectIdAfterLoad = null) {
+    setLoadingCategories(true);
+    try {
+      const data = await fetchPolicyCategories();
+      setCategories(data || []);
+      if (selectIdAfterLoad) {
+        setSelectedCategoryId(selectIdAfterLoad);
+      } else if (!selectedCategoryId && data && data.length > 0) {
+        setSelectedCategoryId(data[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+    } finally {
+      setLoadingCategories(false);
+    }
+  }
+
+  async function handleCreateCategoryInline(e) {
+    if (e) e.preventDefault();
+    setCategoryError('');
+    if (!newCatName.trim()) {
+      setCategoryError('Category name is required.');
+      return;
+    }
+
+    setSavingCategory(true);
+    try {
+      const newCat = await createPolicyCategory({
+        name: newCatName.trim(),
+        description: newCatDesc.trim() || null,
+      });
+
+      setNewCatName('');
+      setNewCatDesc('');
+      setIsCreatingCategory(false);
+      await loadCategories(newCat.id);
+    } catch (err) {
+      setCategoryError(err.message || 'Failed to create category.');
+    } finally {
+      setSavingCategory(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -22,12 +79,20 @@ export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) 
       return;
     }
 
+    if (!selectedCategoryId) {
+      setError('Please select or create a policy category.');
+      return;
+    }
+
+    const matchedCategory = categories.find((c) => c.id === selectedCategoryId);
+
     setSubmitting(true);
     try {
       const newPolicy = await createPolicy({
         name: name.trim(),
         description: description.trim() || null,
-        category,
+        category_id: selectedCategoryId,
+        category: matchedCategory ? matchedCategory.name : 'Health Insurance',
         status,
         created_by: user?.id,
       });
@@ -35,8 +100,8 @@ export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) 
       // Reset form
       setName('');
       setDescription('');
-      setCategory('health');
       setStatus('draft');
+      setIsCreatingCategory(false);
 
       onPolicyCreated(newPolicy);
     } catch (err) {
@@ -44,6 +109,8 @@ export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) 
       setSubmitting(false);
     }
   }
+
+  if (!isOpen) return null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -71,7 +138,7 @@ export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) 
             <input
               id="policy-name"
               type="text"
-              placeholder="e.g. Comprehensive Health Shield"
+              placeholder="e.g. Comprehensive Motor Shield or Silver Health Plan"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
@@ -80,20 +147,95 @@ export default function CreatePolicyModal({ isOpen, onClose, onPolicyCreated }) 
           </div>
 
           <div className="form-row">
+            {/* Category selection with inline creation option */}
             <div className="form-group flex-1">
-              <label htmlFor="policy-category">Category *</label>
-              <select
-                id="policy-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="form-select"
-              >
-                <option value="health">Health Insurance</option>
-                <option value="life">Life Insurance</option>
-                <option value="vehicle">Vehicle Insurance</option>
-                <option value="travel">Travel Insurance</option>
-                <option value="other">Other</option>
-              </select>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <label htmlFor="policy-category" style={{ margin: 0 }}>Policy Category *</label>
+                {!isCreatingCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingCategory(true)}
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontSize: '11px', padding: '2px 6px', height: 'auto' }}
+                  >
+                    + New Category
+                  </button>
+                )}
+              </div>
+
+              {!isCreatingCategory ? (
+                <select
+                  id="policy-category"
+                  value={selectedCategoryId}
+                  onChange={(e) => {
+                    if (e.target.value === '__create_new__') {
+                      setIsCreatingCategory(true);
+                    } else {
+                      setSelectedCategoryId(e.target.value);
+                    }
+                  }}
+                  className="form-select"
+                  disabled={loadingCategories}
+                  required
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                  <option value="__create_new__">+ Create New Category...</option>
+                </select>
+              ) : (
+                <div className="category-inline-creator" style={{
+                  padding: '10px',
+                  backgroundColor: 'var(--color-surface-raised, rgba(0,0,0,0.02))',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '6px',
+                  marginTop: '4px'
+                }}>
+                  {categoryError && (
+                    <div style={{ color: 'var(--color-danger)', fontSize: '12px', marginBottom: '6px' }}>
+                      {categoryError}
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    placeholder="New category name (e.g. Car Insurance)"
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    style={{ width: '100%', marginBottom: '6px', padding: '6px 8px', fontSize: '13px' }}
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    placeholder="Optional description"
+                    value={newCatDesc}
+                    onChange={(e) => setNewCatDesc(e.target.value)}
+                    style={{ width: '100%', marginBottom: '8px', padding: '6px 8px', fontSize: '12px' }}
+                  />
+                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setIsCreatingCategory(false);
+                        setCategoryError('');
+                      }}
+                      disabled={savingCategory}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleCreateCategoryInline}
+                      disabled={savingCategory || !newCatName.trim()}
+                    >
+                      {savingCategory ? 'Saving...' : 'Add Category'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="form-group flex-1">

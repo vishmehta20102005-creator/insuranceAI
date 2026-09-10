@@ -8,6 +8,11 @@ export async function fetchPublishedPolicies() {
     .from('policies')
     .select(`
       *,
+      policy_categories (
+        id,
+        name,
+        description
+      ),
       policy_documents (
         id
       )
@@ -22,6 +27,7 @@ export async function fetchPublishedPolicies() {
 
   return (data || []).map((policy) => ({
     ...policy,
+    category: policy.policy_categories?.name || policy.category || 'Insurance',
     documentsCount: policy.policy_documents ? policy.policy_documents.length : 0,
   }));
 }
@@ -39,6 +45,11 @@ export async function fetchAdminPolicies() {
     .from('policies')
     .select(`
       *,
+      policy_categories (
+        id,
+        name,
+        description
+      ),
       policy_documents (
         id
       )
@@ -52,6 +63,7 @@ export async function fetchAdminPolicies() {
 
   const mapped = (data || []).map((policy) => ({
     ...policy,
+    category: policy.policy_categories?.name || policy.category || 'Insurance',
     documentsCount: policy.policy_documents ? policy.policy_documents.length : 0,
   }));
   _cachedAdminPolicies = mapped;
@@ -91,21 +103,65 @@ export async function fetchPolicyById(id) {
 }
 
 /**
- * Create a new policy.
+ * Fetch all policy categories.
  */
-export async function createPolicy({ name, description, category, status, created_by }) {
+export async function fetchPolicyCategories() {
   const { data, error } = await supabase
-    .from('policies')
+    .from('policy_categories')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching policy categories:', error);
+    throw error;
+  }
+  return data || [];
+}
+
+/**
+ * Create a new policy category.
+ */
+export async function createPolicyCategory({ name, description }) {
+  const { data, error } = await supabase
+    .from('policy_categories')
     .insert([
       {
-        name,
-        description: description || null,
-        category: category || 'health',
-        status: status || 'draft',
-        created_by: created_by || null,
+        name: name.trim(),
+        description: description?.trim() || null,
       },
     ])
     .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating policy category:', error);
+    throw error;
+  }
+  return data;
+}
+
+/**
+ * Create a new policy.
+ */
+export async function createPolicy({ name, description, category_id, category, status, created_by }) {
+  const payload = {
+    name: name.trim(),
+    description: description?.trim() || null,
+    status: status || 'draft',
+    created_by: created_by || null,
+  };
+
+  if (category_id) {
+    payload.category_id = category_id;
+  }
+  if (category) {
+    payload.category = category;
+  }
+
+  const { data, error } = await supabase
+    .from('policies')
+    .insert([payload])
+    .select('*, policy_categories(*)')
     .single();
 
   if (error) {
@@ -127,7 +183,7 @@ export async function updatePolicy(id, updates) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-    .select()
+    .select('*, policy_categories(*)')
     .single();
 
   if (error) {
@@ -136,6 +192,111 @@ export async function updatePolicy(id, updates) {
   }
 
   return data;
+}
+
+/**
+ * Fetch required documents configured for a policy.
+ */
+export async function fetchPolicyRequiredDocuments(policyId) {
+  const { data, error } = await supabase
+    .from('policy_required_documents')
+    .select('*')
+    .eq('policy_id', policyId)
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Error fetching policy required documents:', error);
+    throw error;
+  }
+  return data || [];
+}
+
+/**
+ * Add a new required document type to a policy.
+ */
+export async function addPolicyRequiredDocument(policyId, { document_type, label, display_order }) {
+  const cleanType = document_type
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  const { data, error } = await supabase
+    .from('policy_required_documents')
+    .insert([
+      {
+        policy_id: policyId,
+        document_type: cleanType,
+        label: label.trim(),
+        display_order: typeof display_order === 'number' ? display_order : 0,
+      },
+    ])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding policy required document:', error);
+    throw error;
+  }
+  return data;
+}
+
+/**
+ * Update an existing required document configuration.
+ */
+export async function updatePolicyRequiredDocument(id, { document_type, label, display_order }) {
+  const updates = {};
+  if (document_type) {
+    updates.document_type = document_type
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+  if (label) updates.label = label.trim();
+  if (typeof display_order === 'number') updates.display_order = display_order;
+
+  const { data, error } = await supabase
+    .from('policy_required_documents')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating policy required document:', error);
+    throw error;
+  }
+  return data;
+}
+
+/**
+ * Delete a required document configuration.
+ */
+export async function deletePolicyRequiredDocument(id) {
+  const { error } = await supabase
+    .from('policy_required_documents')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error deleting policy required document:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reorder required documents by updating their display_order.
+ */
+export async function reorderPolicyRequiredDocuments(documents) {
+  const updates = documents.map((doc, idx) =>
+    supabase
+      .from('policy_required_documents')
+      .update({ display_order: idx + 1 })
+      .eq('id', doc.id)
+  );
+  await Promise.all(updates);
 }
 
 /**
