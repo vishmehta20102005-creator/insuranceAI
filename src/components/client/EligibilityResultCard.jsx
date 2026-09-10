@@ -46,6 +46,7 @@ export default function EligibilityResultCard({
   canResubmit,
   isRetrying,
   isSupersededByApproved,
+  auditLogs = [],
   onRetryEligibility,
   onScrollToResubmit,
   onViewDoc,
@@ -745,6 +746,39 @@ export default function EligibilityResultCard({
 
             {historyTab === 'audit' && (
               <div className="history-timeline">
+                {/* Real recorded audit log events if available */}
+                {auditLogs.map((log, idx) => (
+                  <div key={log.id || `audit-${idx}`} className="history-timeline-step">
+                    <div className={`history-step-dot ${log.new_status === 'approved' ? 'step-dot-success' : 'step-dot-neutral'}`}>
+                      {log.new_status === 'approved' ? '✓' : log.new_status === 'needs_review' ? '⚠' : '•'}
+                    </div>
+                    <div className="history-step-content">
+                      <h4 className="history-step-title">
+                        {log.action === 'admin_override'
+                          ? `Underwriter Action: ${log.new_status ? log.new_status.replace('_', ' ').toUpperCase() : 'Updated'}`
+                          : log.action === 'ai_verdict'
+                          ? `Automated AI Evaluation: ${log.new_status ? log.new_status.replace('_', ' ').toUpperCase() : 'Completed'}`
+                          : `Status Change: ${log.new_status}`}
+                      </h4>
+                      <div className="history-step-meta">
+                        {log.created_at &&
+                          new Date(log.created_at).toLocaleDateString(undefined, {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                      </div>
+                      {log.reason && (
+                        <p className="history-step-desc" style={{ color: 'var(--color-text)', fontWeight: 500, marginTop: '4px' }}>
+                          Underwriting Note: {log.reason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
                 {/* Step 1: Latest Status */}
                 <div className="history-timeline-step">
                   <div className={`history-step-dot ${isSuccess ? 'step-dot-success' : 'step-dot-neutral'}`}>

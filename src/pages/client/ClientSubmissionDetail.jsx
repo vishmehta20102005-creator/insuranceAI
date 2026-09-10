@@ -7,7 +7,125 @@ import {
   fetchEligibilityResult,
   getSubmissionDocumentSignedUrl,
 } from '../../lib/submissions';
+import { fetchClientSubmissionAuditLogs } from '../../lib/audit';
 import EligibilityResultCard from '../../components/client/EligibilityResultCard';
+
+function extractReviewReason(submission, result, auditLogs) {
+  // 1. Check if admin left an explicit note in audit log
+  const adminLog = (auditLogs || []).find(
+    (l) => (l.new_status === 'needs_review' || l.action === 'admin_override') && l.reason && l.reason.trim()
+  );
+  if (adminLog?.reason) {
+    return {
+      headline: adminLog.reason.trim(),
+      details: 'Recorded by insurance underwriter during manual assessment.',
+      source: 'Underwriter Audit Note',
+    };
+  }
+
+  // 2. Check for unclear or warning rules from the AI evaluation
+  const reasons = Array.isArray(result?.reasons) ? result.reasons : [];
+
+  // Check for rules marked 'unclear'
+  const unclear = reasons.filter((r) => r.status === 'unclear');
+  if (unclear.length > 0) {
+    const item = unclear[0];
+    return {
+      headline: item.rule_checked || item.rule || 'Document Clarification Required',
+      details: item.client_evidence
+        ? `Evidence note: ${item.client_evidence}`
+        : 'Submitted document information requires manual review by an underwriter to confirm compliance.',
+      source: item.policy_source || 'Policy Guidelines',
+    };
+  }
+
+  // Check for rules with warning severity or mentioning underwriting/medical terms
+  const underwritingRule = reasons.find((r) => {
+    const text = `${r.rule_checked || r.rule || ''} ${r.client_evidence || ''} ${r.policy_source || ''}`.toLowerCase();
+    return (
+      r.severity === 'warning' ||
+      text.includes('underwriting') ||
+      text.includes('medical underwriting') ||
+      text.includes('manual review') ||
+      text.includes('blood pressure') ||
+      text.includes('clarification') ||
+      text.includes('requires additional')
+    );
+  });
+
+  if (underwritingRule) {
+    return {
+      headline: underwritingRule.rule_checked || underwritingRule.rule || 'Specialized Underwriting Review Triggered',
+      details: underwritingRule.client_evidence
+        ? `Evidence note: ${underwritingRule.client_evidence}`
+        : 'This specific condition or document clause requires manual underwriter clearance before approval.',
+      source: underwritingRule.policy_source || 'Policy Underwriting Guidelines',
+    };
+  }
+
+  // 3. If AI summary mentions needs review or specific reasons
+  if (result?.summary && result.verdict === 'needs_review') {
+    return {
+      headline: result.summary,
+      details: 'Automated document analysis flagged this submission for secondary underwriter verification.',
+      source: 'AI Assessment Finding',
+    };
+  }
+
+  // 4. Default fallback
+  return {
+    headline: 'Mandatory Policy Underwriting Protocol',
+    details: 'Baseline documents were received. Policy terms require formal underwriter sign-off before policy activation.',
+    source: 'Policy Underwriting Protocol',
+  };
+}
+
+function extractStatusResolution(submission, isSupersededByApproved, policyApprovedSub) {
+  if (isSupersededByApproved) {
+    const dateStr = policyApprovedSub?.submitted_at
+      ? new Date(policyApprovedSub.submitted_at).toLocaleDateString(undefined, {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })
+      : '';
+    return {
+      headline: '✓ Resolved — Approved & Active Coverage',
+      details: `A subsequent application for this policy was approved${dateStr ? ` on ${dateStr}` : ''}. You are actively covered under this policy.`,
+      isSuccess: true,
+    };
+  }
+
+  if (submission?.status === 'approved') {
+    return {
+      headline: '✓ Approved & Active Coverage',
+      details: 'Underwriter review has been completed and your policy was fully approved.',
+      isSuccess: true,
+    };
+  }
+
+  if (submission?.status === 'needs_review') {
+    return {
+      headline: '⏳ Review In Progress with Underwriting Team',
+      details: 'An insurance specialist is evaluating your submitted documents. No further action is required from you at this time.',
+      isSuccess: false,
+    };
+  }
+
+  if (submission?.status === 'rejected' || submission?.status === 'not_eligible') {
+    return {
+      headline: '✗ Application Not Approved',
+      details: 'This application did not meet policy underwriting requirements. You may reapply with revised documentation.',
+      isSuccess: false,
+    };
+  }
+
+  return {
+    headline: `Status: ${submission?.status || 'Pending'}`,
+    details: 'Application evaluation is currently underway.',
+    isSuccess: false,
+  };
+}
 
 function formatFileSize(bytes) {
   if (!bytes) return '';
@@ -55,6 +173,7 @@ export default function ClientSubmissionDetail() {
   const [submission,          setSubmission]          = useState(null);
   const [eligibilityResult,   setEligibilityResult]   = useState(null);
   const [relatedSubmissions,  setRelatedSubmissions]  = useState([]);
+  const [auditLogs,           setAuditLogs]           = useState([]);
   const [loading,             setLoading]             = useState(true);
   const [error,               setError]               = useState('');
   const [viewingDocId,        setViewingDocId]        = useState(null);
@@ -80,7 +199,16 @@ export default function ClientSubmissionDetail() {
           setEligibilityResult(null);
         }
 
-        // 3. Fetch all submissions for this policy by this client to detect superseding
+        // 3. Fetch client audit logs for this submission
+        try {
+          const logs = await fetchClientSubmissionAuditLogs(sub.id);
+          setAuditLogs(logs || []);
+        } catch (logErr) {
+          console.warn('Could not fetch client audit logs:', logErr);
+          setAuditLogs([]);
+        }
+
+        // 4. Fetch all submissions for this policy by this client to detect superseding
         if (sub.policy_id) {
           try {
             const relSubs = await fetchAllSubmissionsForPolicyByClient(sub.policy_id, user.id);
@@ -163,6 +291,13 @@ export default function ClientSubmissionDetail() {
   const policyApprovedSub = relatedSubmissions.find((s) => ['approved', 'eligible'].includes(s.status));
   const isSupersededByApproved = policyApprovedSub && policyApprovedSub.id !== submission.id;
   const canReapply = !policyApprovedSub && ['needs_review', 'not_eligible', 'rejected'].includes(submission.status);
+
+  const reviewReason = extractReviewReason(submission, eligibilityResult, auditLogs);
+  const statusResolution = extractStatusResolution(submission, isSupersededByApproved, policyApprovedSub);
+  const isReviewRelevant =
+    submission.status === 'needs_review' ||
+    isSupersededByApproved ||
+    (auditLogs || []).some((l) => l.new_status === 'needs_review');
 
   const formattedDate = new Date(submission.submitted_at).toLocaleDateString(undefined, {
     day: 'numeric',
@@ -325,63 +460,153 @@ export default function ClientSubmissionDetail() {
           </div>
         </div>
 
-        {/* Banner if this application was resolved by a subsequent approved submission */}
-        {isSupersededByApproved && (
+        {/* ── Underwriting Review Assessment & Resolution Breakdown ── */}
+        {isReviewRelevant && (
           <div
+            className="card"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: 'rgba(22, 163, 74, 0.08)',
-              border: '1px solid rgba(22, 163, 74, 0.3)',
-              borderRadius: '12px',
-              padding: '16px 20px',
               marginBottom: '24px',
-              gap: '16px',
-              flexWrap: 'wrap',
+              padding: '24px 28px',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: '12px',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
               <div
                 style={{
                   width: '36px',
                   height: '36px',
-                  borderRadius: '50%',
-                  background: '#dcfce7',
-                  color: '#16a34a',
+                  borderRadius: '8px',
+                  background: 'rgba(217, 119, 6, 0.1)',
+                  color: '#d97706',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontWeight: 700,
-                  fontSize: '1.1rem',
-                  flexShrink: 0,
                 }}
               >
-                ✓
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
               </div>
               <div>
-                <div style={{ fontWeight: 600, color: '#15803d', fontSize: '0.95rem' }}>
-                  Application Status Resolved
-                </div>
-                <div style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                  A subsequent application for this policy was approved on{' '}
-                  {new Date(policyApprovedSub.submitted_at).toLocaleDateString(undefined, {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
-                  . Your coverage is active.
-                </div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+                  Underwriting Review Assessment
+                </h3>
+                <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', margin: '2px 0 0' }}>
+                  Clear breakdown of why this application required manual review and its current resolution.
+                </p>
               </div>
             </div>
 
-            <Link
-              to={`/client/submissions/${policyApprovedSub.id}`}
-              className="btn btn-sm btn-primary"
-              style={{ whiteSpace: 'nowrap' }}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: '16px',
+              }}
             >
-              View Approved Application →
-            </Link>
+              {/* Box 1: Why Review Was Required */}
+              <div
+                style={{
+                  background: 'rgba(217, 119, 6, 0.04)',
+                  border: '1px solid rgba(217, 119, 6, 0.25)',
+                  borderRadius: '10px',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#d97706' }} />
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#b45309',
+                      }}
+                    >
+                      Why Review Was Required
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text)', lineHeight: 1.4 }}>
+                    {reviewReason.headline}
+                  </div>
+                  {reviewReason.details && (
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '8px', lineHeight: 1.5 }}>
+                      {reviewReason.details}
+                    </div>
+                  )}
+                </div>
+                {reviewReason.source && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '12px', borderTop: '1px dashed rgba(217, 119, 6, 0.2)', paddingTop: '6px' }}>
+                    Source: {reviewReason.source}
+                  </div>
+                )}
+              </div>
+
+              {/* Box 2: Current Status & Resolution */}
+              <div
+                style={{
+                  background: statusResolution.isSuccess ? 'rgba(22, 163, 74, 0.04)' : 'rgba(37, 99, 235, 0.04)',
+                  border: `1px solid ${statusResolution.isSuccess ? 'rgba(22, 163, 74, 0.25)' : 'rgba(37, 99, 235, 0.25)'}`,
+                  borderRadius: '10px',
+                  padding: '16px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <span
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: statusResolution.isSuccess ? '#16a34a' : '#2563eb',
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: statusResolution.isSuccess ? '#15803d' : '#1d4ed8',
+                      }}
+                    >
+                      Current Status & Resolution
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text)', lineHeight: 1.4 }}>
+                    {statusResolution.headline}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginTop: '8px', lineHeight: 1.5 }}>
+                    {statusResolution.details}
+                  </div>
+                </div>
+
+                {isSupersededByApproved && policyApprovedSub && (
+                  <div style={{ marginTop: '14px', borderTop: '1px dashed rgba(22, 163, 74, 0.2)', paddingTop: '10px' }}>
+                    <Link
+                      to={`/client/submissions/${policyApprovedSub.id}`}
+                      className="btn btn-sm btn-primary"
+                      style={{ fontSize: '0.8rem', padding: '6px 14px' }}
+                    >
+                      View Active Approved Application →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -393,6 +618,7 @@ export default function ClientSubmissionDetail() {
             policy={policy}
             canResubmit={canReapply}
             isSupersededByApproved={isSupersededByApproved}
+            auditLogs={auditLogs}
             onViewDoc={handleViewDoc}
             viewingDocId={viewingDocId}
             onScrollToResubmit={() => {
