@@ -122,7 +122,6 @@ export default function ClientCurrentPolicies() {
     return true;
   });
 
-  const totalVerifiedDocs = approvedPolicies.reduce((acc, p) => acc + (p.documents?.length || 0), 0);
   const uniqueCategoriesCount = new Set(
     approvedPolicies.map((p) => p.policy?.policy_categories?.name || p.policy?.category).filter(Boolean)
   ).size;
@@ -216,7 +215,7 @@ export default function ClientCurrentPolicies() {
         </div>
 
         {/* Stats Grid */}
-        <div className="stats-grid" style={{ marginBottom: '32px' }}>
+        <div className="stats-grid" style={{ marginBottom: '32px', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           <div className="card stat-card">
             <div className="stat-card-inner">
               <div>
@@ -239,25 +238,6 @@ export default function ClientCurrentPolicies() {
           <div className="card stat-card">
             <div className="stat-card-inner">
               <div>
-                <span className="stat-label">Coverage Status</span>
-                <div className="stat-value" style={{ color: '#15803d', fontSize: '1.25rem' }}>
-                  {approvedPolicies.length > 0 ? 'Active & Covered' : 'No Active Policies'}
-                </div>
-              </div>
-              <div className="stat-icon-wrapper" style={{ background: 'rgba(22, 163, 74, 0.1)', color: '#15803d' }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </div>
-            </div>
-            <div className="stat-note">
-              {approvedPolicies.length > 0 ? 'Underwriting approval confirmed' : 'Submit an application to activate'}
-            </div>
-          </div>
-
-          <div className="card stat-card">
-            <div className="stat-card-inner">
-              <div>
                 <span className="stat-label">Categories Covered</span>
                 <div className="stat-value">
                   {uniqueCategoriesCount}
@@ -272,26 +252,6 @@ export default function ClientCurrentPolicies() {
             </div>
             <div className="stat-note">
               {uniqueCategoriesCount === 1 ? '1 insurance category' : `${uniqueCategoriesCount} insurance categories`}
-            </div>
-          </div>
-
-          <div className="card stat-card">
-            <div className="stat-card-inner">
-              <div>
-                <span className="stat-label">Verified Documents</span>
-                <div className="stat-value">
-                  {totalVerifiedDocs}
-                </div>
-              </div>
-              <div className="stat-icon-wrapper" style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-secondary)' }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-              </div>
-            </div>
-            <div className="stat-note">
-              Underwriting verified files
             </div>
           </div>
         </div>
