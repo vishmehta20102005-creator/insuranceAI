@@ -88,16 +88,13 @@ export default function EligibilityResultCard({
     return { issues: issuesList, unclear: unclearList, satisfied: satisfiedList };
   }, [reasons]);
 
-  // Tab state for non-approved detailed rule breakdown
-  const defaultTab = isSuccess
-    ? 'satisfied'
-    : currentStatus === 'needs_review'
-    ? (issues.length > 0 ? 'issues' : unclear.length > 0 ? 'unclear' : '')
-    : issues.length > 0
-    ? 'issues'
-    : unclear.length > 0
-    ? 'unclear'
-    : 'all';
+  const isRejected = currentStatus === 'rejected' || currentStatus === 'not_eligible';
+  const displaySummary = (isOverridden && isRejected && issues.length === 0)
+    ? 'This application did not meet underwriting criteria and was not approved based on the submitted documents.'
+    : result?.summary;
+
+  // Tab state for non-approved detailed rule breakdown (only issues or unclear)
+  const defaultTab = issues.length > 0 ? 'issues' : unclear.length > 0 ? 'unclear' : '';
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   // History tab state: 'docs' | 'audit'
@@ -346,10 +343,12 @@ export default function EligibilityResultCard({
                     <polyline points="10 9 9 9 8 9" />
                   </svg>
                   <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text)' }}>
-                    {isSupersededByApproved
-                      ? 'AI Document Pre-Screening (Historical Record)'
+                    {isRejected
+                      ? 'Underwriting Assessment'
+                      : isSupersededByApproved
+                      ? 'AI Document Pre-Screening (Previous Attempt)'
                       : currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0
-                      ? 'AI Document Pre-Screening: Criteria Met'
+                      ? 'AI Document Pre-Screening: Pending Underwriter Review'
                       : 'AI Assessment Summary'}
                   </h3>
                 </div>
@@ -374,16 +373,10 @@ export default function EligibilityResultCard({
                 </div>
               </div>
 
-              {result?.summary && (
+              {displaySummary && (
                 <p className="eligibility-summary-text">
-                  {renderFormattedText(result.summary)}
+                  {renderFormattedText(displaySummary)}
                 </p>
-              )}
-
-              {isSupersededByApproved && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontSize: '0.85rem', fontWeight: 500, marginTop: '8px' }}>
-                  <span>✓ Preliminary criteria were verified by AI. Application resolved by approved subsequent submission.</span>
-                </div>
               )}
 
               {!isSupersededByApproved && currentStatus === 'needs_review' && issues.length === 0 && unclear.length === 0 && (
@@ -418,19 +411,8 @@ export default function EligibilityResultCard({
               )}
 
               {/* Scannable interactive metrics bar */}
-              {(issues.length > 0 || unclear.length > 0 || (currentStatus !== 'needs_review' && (satisfied.length > 0 || reasons.length > 0))) && (
+              {(issues.length > 0 || unclear.length > 0) && (
                 <div className="eligibility-metrics-bar">
-                  {currentStatus !== 'needs_review' && (
-                    <button
-                      type="button"
-                      className={`metric-chip ${activeTab === 'all' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('all')}
-                      title="Show all rules verified"
-                    >
-                      <span className="metric-label">Rules Verified</span>
-                      <span className="metric-value">{reasons.length}</span>
-                    </button>
-                  )}
                   {issues.length > 0 && (
                     <button
                       type="button"
@@ -453,81 +435,41 @@ export default function EligibilityResultCard({
                       <span className="metric-value" style={{ color: '#d97706' }}>{unclear.length}</span>
                     </button>
                   )}
-                  {satisfied.length > 0 && currentStatus !== 'needs_review' && (
-                    <button
-                      type="button"
-                      className={`metric-chip metric-chip-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('satisfied')}
-                      title="Filter to requirements met"
-                    >
-                      <span className="metric-label">Requirements Met</span>
-                      <span className="metric-value" style={{ color: '#16a34a' }}>{satisfied.length}</span>
-                    </button>
-                  )}
                 </div>
               )}
             </div>
 
             {/* Filter Tabs for Issues / Rules */}
-            {(issues.length > 0 || unclear.length > 0 || (currentStatus !== 'needs_review' && (satisfied.length > 0 || reasons.length > 0))) && (
+            {(issues.length > 0 && unclear.length > 0) && (
               <div className="rules-tab-bar" role="tablist" aria-label="Filter rules by status">
-                {issues.length > 0 && (
-                  <button
-                    type="button"
-                    className={`rules-tab-btn tab-issues ${activeTab === 'issues' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('issues')}
-                    role="tab"
-                    aria-selected={activeTab === 'issues'}
-                  >
-                    <span className="rules-tab-dot dot-issue" />
-                    <span>Issues to Resolve</span>
-                    <span className="rules-tab-count badge-issues">{issues.length}</span>
-                  </button>
-                )}
-                {unclear.length > 0 && (
-                  <button
-                    type="button"
-                    className={`rules-tab-btn tab-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('unclear')}
-                    role="tab"
-                    aria-selected={activeTab === 'unclear'}
-                  >
-                    <span className="rules-tab-dot dot-unclear" />
-                    <span>Needs Clarification</span>
-                    <span className="rules-tab-count badge-unclear">{unclear.length}</span>
-                  </button>
-                )}
-                {satisfied.length > 0 && currentStatus !== 'needs_review' && (
-                  <button
-                    type="button"
-                    className={`rules-tab-btn tab-satisfied ${activeTab === 'satisfied' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('satisfied')}
-                    role="tab"
-                    aria-selected={activeTab === 'satisfied'}
-                  >
-                    <span className="rules-tab-dot dot-satisfied" />
-                    <span>Requirements Met</span>
-                    <span className="rules-tab-count badge-satisfied">{satisfied.length}</span>
-                  </button>
-                )}
-                {currentStatus !== 'needs_review' && (
-                  <button
-                    type="button"
-                    className={`rules-tab-btn tab-all ${activeTab === 'all' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('all')}
-                    role="tab"
-                    aria-selected={activeTab === 'all'}
-                  >
-                    <span>All Rules</span>
-                    <span className="rules-tab-count badge-neutral">{reasons.length}</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={`rules-tab-btn tab-issues ${activeTab === 'issues' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('issues')}
+                  role="tab"
+                  aria-selected={activeTab === 'issues'}
+                >
+                  <span className="rules-tab-dot dot-issue" />
+                  <span>Issues to Resolve</span>
+                  <span className="rules-tab-count badge-issues">{issues.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`rules-tab-btn tab-unclear ${activeTab === 'unclear' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('unclear')}
+                  role="tab"
+                  aria-selected={activeTab === 'unclear'}
+                >
+                  <span className="rules-tab-dot dot-unclear" />
+                  <span>Needs Clarification</span>
+                  <span className="rules-tab-count badge-unclear">{unclear.length}</span>
+                </button>
               </div>
             )}
 
             {/* Grouped Reasons List */}
             <div className="reasons-section">
-              {(activeTab === 'issues' || activeTab === 'all') && issues.length > 0 && (
+              {(activeTab === 'issues' || !activeTab) && issues.length > 0 && (
                 <div className="reasons-group issues-group">
                   <div className="reasons-group-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -553,7 +495,7 @@ export default function EligibilityResultCard({
                 </div>
               )}
 
-              {(activeTab === 'unclear' || activeTab === 'all') && unclear.length > 0 && (
+              {(activeTab === 'unclear' || !activeTab) && unclear.length > 0 && (
                 <div className="reasons-group unclear-group">
                   <div className="reasons-group-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -579,27 +521,26 @@ export default function EligibilityResultCard({
                 </div>
               )}
 
-              {currentStatus !== 'needs_review' && (activeTab === 'satisfied' || activeTab === 'all') && satisfied.length > 0 && (
-                <div className="reasons-group satisfied-group">
+              {isRejected && issues.length === 0 && unclear.length === 0 && (
+                <div className="reasons-group issues-group">
                   <div className="reasons-group-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className="reasons-group-icon satisfied-icon">
+                      <span className="reasons-group-icon issues-icon">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <polyline points="20 6 9 17 4 12" />
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
                       </span>
-                      <h3 className="reasons-group-title" style={{ color: '#15803d' }}>
-                        Requirements Met ({satisfied.length})
+                      <h3 className="reasons-group-title" style={{ color: '#b91c1c' }}>
+                        Underwriting Determination
                       </h3>
                     </div>
-                    <span className="reasons-group-hint">Verified and satisfied</span>
+                    <span className="reasons-group-hint">Application Not Approved</span>
                   </div>
-
-                  <div className="reasons-list">
-                    {satisfied.map((r, idx) => (
-                      <ReasonItem key={`satisfied-${idx}`} reason={r} type="satisfied" />
-                    ))}
-                  </div>
+                  <p style={{ margin: '12px 0 0', fontSize: '0.875rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                    This application was reviewed and rejected based on the documents submitted.
+                  </p>
                 </div>
               )}
             </div>
