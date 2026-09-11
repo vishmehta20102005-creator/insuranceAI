@@ -310,19 +310,26 @@ export default function ClientSubmissions() {
                     {filteredSubmissions.map((sub) => {
                       const latestForThisPolicy = latestSubmissionByPolicy[sub.policy_id];
                       const isLatest = latestForThisPolicy?.id === sub.id;
-                      const policyApproved = ['approved', 'eligible'].includes(latestForThisPolicy?.status);
-                      const policyInReview = ['pending', 'processing'].includes(latestForThisPolicy?.status);
+
+                      // Check if client has ANY approved/eligible or in-review submission for this policy
+                      const hasApprovedPolicy = submissions.some(
+                        (s) => s.policy_id === sub.policy_id && ['approved', 'eligible'].includes(s.status)
+                      );
+                      const hasInReviewPolicy = submissions.some(
+                        (s) => s.policy_id === sub.policy_id && ['pending', 'processing'].includes(s.status)
+                      );
 
                       // Can this submission prompt Reapply?
-                      // Strictly ONLY if it is the latest submission for this policy, the policy is NOT approved,
-                      // NOT in review, and its status is rejected/not_eligible/needs_review.
-                      const canReapply = isLatest && !policyApproved && !policyInReview && ['rejected', 'not_eligible', 'needs_review'].includes(sub.status);
+                      // If the policy is ALREADY approved/eligible, it CANNOT be reapplied.
+                      // Strictly ONLY allow Reapply if this is the latest attempt, no active coverage exists,
+                      // and status is rejected/not_eligible/needs_review.
+                      const canReapply = isLatest && !hasApprovedPolicy && !hasInReviewPolicy && ['rejected', 'not_eligible', 'needs_review'].includes(sub.status);
 
                       return (
                         <tr
                           key={sub.id}
                           style={{
-                            opacity: !isLatest && policyApproved ? 0.8 : 1,
+                            opacity: !isLatest && hasApprovedPolicy ? 0.8 : 1,
                           }}
                         >
                           <td>
@@ -359,12 +366,12 @@ export default function ClientSubmissions() {
                                     fontWeight: 600,
                                     padding: '2px 7px',
                                     borderRadius: '4px',
-                                    background: policyApproved ? 'rgba(22, 163, 74, 0.08)' : 'var(--color-surface-sunken)',
-                                    color: policyApproved ? 'var(--color-success, #16a34a)' : 'var(--color-text-muted)',
-                                    border: '1px solid ' + (policyApproved ? 'rgba(22, 163, 74, 0.2)' : 'var(--color-border)'),
+                                    background: 'var(--color-surface-sunken)',
+                                    color: 'var(--color-text-muted)',
+                                    border: '1px solid var(--color-border)',
                                   }}
                                 >
-                                  {policyApproved ? 'Resolved (Approved)' : 'Previous Attempt'}
+                                  Previous Attempt
                                 </span>
                               )}
                             </div>

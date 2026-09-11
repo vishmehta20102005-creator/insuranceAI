@@ -81,6 +81,23 @@ function extractReviewReason(submission, result, auditLogs) {
 }
 
 function extractStatusResolution(submission, isSupersededByApproved, policyApprovedSub) {
+  if (submission?.status === 'rejected' || submission?.status === 'not_eligible') {
+    const dateStr = policyApprovedSub?.submitted_at
+      ? new Date(policyApprovedSub.submitted_at).toLocaleDateString(undefined, {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        })
+      : '';
+    return {
+      headline: '✗ Application Not Approved',
+      details: isSupersededByApproved
+        ? `This specific application did not meet policy requirements and was rejected based on the documents submitted. (Note: You hold active approved coverage under this policy from a subsequent application${dateStr ? ` on ${dateStr}` : ''}).`
+        : 'This application did not meet policy underwriting requirements based on the submitted documents.',
+      isSuccess: false,
+    };
+  }
+
   if (isSupersededByApproved) {
     const dateStr = policyApprovedSub?.submitted_at
       ? new Date(policyApprovedSub.submitted_at).toLocaleDateString(undefined, {
@@ -108,14 +125,6 @@ function extractStatusResolution(submission, isSupersededByApproved, policyAppro
     return {
       headline: '⏳ Review In Progress with Underwriting Team',
       details: 'An insurance specialist is evaluating your submitted documents. No further action is required from you at this time.',
-      isSuccess: false,
-    };
-  }
-
-  if (submission?.status === 'rejected' || submission?.status === 'not_eligible') {
-    return {
-      headline: '✗ Application Not Approved',
-      details: 'This application did not meet policy underwriting requirements. You may reapply with revised documentation.',
       isSuccess: false,
     };
   }
@@ -447,18 +456,59 @@ export default function ClientSubmissionDetail() {
                       fontWeight: 600,
                       padding: '3px 8px',
                       borderRadius: '12px',
-                      background: 'rgba(22, 163, 74, 0.1)',
-                      color: '#16a34a',
-                      border: '1px solid rgba(22, 163, 74, 0.25)',
+                      background: 'var(--color-surface-sunken)',
+                      color: 'var(--color-text-muted)',
+                      border: '1px solid var(--color-border)',
                     }}
                   >
-                    Resolved (Approved)
+                    Previous Attempt
                   </span>
                 )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* ── Active Coverage Notice (if this attempt was rejected, but policy is approved via another submission) ── */}
+        {isSupersededByApproved && policyApprovedSub && (
+          <div
+            className="card"
+            style={{
+              marginBottom: '20px',
+              padding: '16px 20px',
+              background: 'rgba(22, 163, 74, 0.06)',
+              border: '1px solid rgba(22, 163, 74, 0.25)',
+              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
+                  Active Approved Policy Coverage Confirmed
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                  You hold active approved coverage under this policy from a subsequent application. Reapplication is closed.
+                </div>
+              </div>
+            </div>
+            <Link
+              to={`/client/submissions/${policyApprovedSub.id}`}
+              className="btn btn-sm btn-ghost"
+              style={{ color: '#16a34a', borderColor: 'rgba(22, 163, 74, 0.3)' }}
+            >
+              View Approved Application →
+            </Link>
+          </div>
+        )}
 
         {/* ── Underwriting Review Assessment & Resolution Breakdown ── */}
         {isReviewRelevant && (

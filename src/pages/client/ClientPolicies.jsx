@@ -99,11 +99,12 @@ function PolicyTableRow({
   viewingDocId,
   submissions = [],
 }) {
-  // Find latest submission status for this policy
-  const latestSub = submissions
-    .filter((s) => s.policy_id === policy.id)
-    .sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at))[0];
-  const subStatus = latestSub?.status ?? null;
+  // Find submissions for this policy
+  const policySubs = submissions.filter((s) => s.policy_id === policy.id);
+  const approvedSub = policySubs.find((s) => ['approved', 'eligible'].includes(s.status));
+  const latestSub = [...policySubs].sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at))[0];
+  const isApproved = Boolean(approvedSub);
+  const subStatus = isApproved ? approvedSub.status : (latestSub?.status ?? null);
 
   return (
     <Fragment>
@@ -170,7 +171,7 @@ function PolicyTableRow({
 
         {/* Action button */}
         <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-          {subStatus && !['rejected', 'not_eligible', 'needs_review'].includes(subStatus) ? (
+          {isApproved || (subStatus && !['rejected', 'not_eligible', 'needs_review'].includes(subStatus)) ? (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
               <SubmissionStatusBadge status={subStatus} />
               <Link to={`/client/policies/${policy.id}`} className="btn btn-ghost btn-sm">

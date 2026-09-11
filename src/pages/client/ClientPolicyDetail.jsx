@@ -66,6 +66,7 @@ export default function ClientPolicyDetail() {
   const [policy,       setPolicy]       = useState(null);
   const [requiredDocs, setRequiredDocs] = useState([]);
   const [submission,   setSubmission]   = useState(null); // most recent submission or null
+  const [policyApprovedSubmission, setPolicyApprovedSubmission] = useState(null);
   const [pageLoading,  setPageLoading]  = useState(true);
   const [pageError,    setPageError]    = useState('');
 
@@ -144,6 +145,17 @@ export default function ClientPolicyDetail() {
           console.error('Failed to load required documents:', docErr);
           setRequiredDocs([]);
         }
+
+        // Check all submissions by this client for this policy to detect existing approved coverage
+        const { data: userPolicySubs } = await supabase
+          .from('client_submissions')
+          .select('id, status, submitted_at')
+          .eq('client_id', user.id)
+          .eq('policy_id', policyId)
+          .order('submitted_at', { ascending: false });
+
+        const approvedSub = (userPolicySubs || []).find((s) => ['approved', 'eligible'].includes(s.status));
+        setPolicyApprovedSubmission(approvedSub || null);
 
         // Check for specific requested submission or the most recent submission by this client
         let existing = null;
@@ -353,8 +365,9 @@ export default function ClientPolicyDetail() {
   // Allow resubmission on rejected, not_eligible, or needs_review (recoverable outcomes).
   const BLOCKING_STATUSES = ['pending', 'processing', 'approved', 'eligible'];
   const RESUBMIT_STATUSES = ['rejected', 'not_eligible', 'needs_review'];
-  const isBlocked = submission && BLOCKING_STATUSES.includes(submission.status);
-  const canResubmit = submission && RESUBMIT_STATUSES.includes(submission.status);
+  const hasApprovedCoverage = Boolean(policyApprovedSubmission);
+  const isBlocked = hasApprovedCoverage || (submission && BLOCKING_STATUSES.includes(submission.status));
+  const canResubmit = !hasApprovedCoverage && submission && RESUBMIT_STATUSES.includes(submission.status);
   const showForm  = !isBlocked;
 
   return (
@@ -605,6 +618,36 @@ export default function ClientPolicyDetail() {
                         </div>
                       )}
                     </>
+                  )}
+
+                  {/* ── Active Approved Coverage Banner (blocks re-application) ── */}
+                  {hasApprovedCoverage && (
+                    <div
+                      className="card"
+                      style={{
+                        marginBottom: '24px',
+                        padding: '20px 24px',
+                        background: 'rgba(22, 163, 74, 0.08)',
+                        border: '1px solid rgba(22, 163, 74, 0.25)',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                      }}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                      <div>
+                        <h4 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#16a34a', fontWeight: 600 }}>
+                          Active Policy Coverage Confirmed
+                        </h4>
+                        <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                          You already hold active approved coverage under this policy. Reapplication is not permitted.
+                        </p>
+                      </div>
+                    </div>
                   )}
 
                   {/* ── UPLOAD FORM ── */}

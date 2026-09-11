@@ -187,6 +187,19 @@ export async function fetchClientApprovedPolicies(clientId) {
  * Returns the newly created submission row.
  */
 export async function createSubmission(clientId, policyId) {
+  // Guard: Ensure client does not already have an approved or eligible submission for this policy
+  const { data: approvedExisting, error: checkError } = await supabase
+    .from('client_submissions')
+    .select('id, status')
+    .eq('client_id', clientId)
+    .eq('policy_id', policyId)
+    .in('status', ['approved', 'eligible'])
+    .limit(1);
+
+  if (!checkError && approvedExisting && approvedExisting.length > 0) {
+    throw new Error('You already have active approved coverage for this policy. Reapplication is not permitted.');
+  }
+
   const { data, error } = await supabase
     .from('client_submissions')
     .insert([{ client_id: clientId, policy_id: policyId, status: 'pending' }])
