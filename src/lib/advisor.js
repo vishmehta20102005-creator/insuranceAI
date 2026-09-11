@@ -52,6 +52,19 @@ export async function sendAdvisorMessage({ conversationId = null, message = '', 
 
   if (error) {
     console.error('Error in policy-advisor-chat function invoke:', error);
+    let errorDetails = '';
+    try {
+      if (error.context && typeof error.context.json === 'function') {
+        const errJson = await error.context.json();
+        errorDetails = errJson?.details || errJson?.error || '';
+      }
+    } catch {
+      // Ignore json parse error
+    }
+    if (errorDetails) {
+      console.error('Advisor Edge Function error details:', errorDetails);
+      throw new Error(errorDetails);
+    }
     throw error;
   }
 

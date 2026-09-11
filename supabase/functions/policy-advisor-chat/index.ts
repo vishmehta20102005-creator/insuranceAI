@@ -452,15 +452,13 @@ Deno.serve(async (req: Request) => {
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     let assistantReply = "";
     let publishedPolicies: any[] = [];
+    const isRecommendation = isRecommendationIntent(message, attachmentsList.length > 0);
 
     if (!GEMINI_API_KEY) {
       console.error("[policy-advisor-chat] GEMINI_API_KEY not configured");
       assistantReply =
         "The AI advisor service is currently not configured with an API key. Please contact support.";
     } else {
-      // Determine if this turn triggers the heavy policy recommendation comparison
-      const isRecommendation = isRecommendationIntent(message, attachmentsList.length > 0);
-
       // Fetch entire conversation history for context memory
       const { data: convHistory } = await adminClient
         .from("chat_messages")
