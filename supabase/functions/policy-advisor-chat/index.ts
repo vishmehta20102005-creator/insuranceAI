@@ -466,7 +466,7 @@ Deno.serve(async (req: Request) => {
         .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true });
 
-      // ── Fetch all currently published policies with categories (Ground truth for entire turn) ──
+      // ── Fetch all currently published policies with categories & configured required documents (Ground truth for entire turn) ──
       const { data: pubPolicies } = await adminClient
         .from("policies")
         .select(`
@@ -479,10 +479,32 @@ Deno.serve(async (req: Request) => {
             id,
             name,
             description
+          ),
+          policy_required_documents (
+            id,
+            policy_id,
+            document_type,
+            label,
+            display_order
           )
         `)
         .eq("status", "published");
       publishedPolicies = pubPolicies || [];
+
+      // Sort required documents by display_order for each policy
+      for (const p of publishedPolicies) {
+        if (Array.isArray(p.policy_required_documents)) {
+          p.policy_required_documents.sort(
+            (a: any, b: any) => (a.display_order ?? 0) - (b.display_order ?? 0)
+          );
+        }
+      }
+
+      // Map policy required documents by policy_id
+      const policyReqDocsMap: Record<string, any[]> = {};
+      for (const p of publishedPolicies) {
+        policyReqDocsMap[p.id] = p.policy_required_documents || [];
+      }
 
       const liveCategories = Array.from(
         new Set(
@@ -496,9 +518,13 @@ Deno.serve(async (req: Request) => {
         ? publishedPolicies
             .map((p: any) => {
               const cat = p.policy_categories?.name || p.category || "General Insurance";
-              return `• "${p.name}" (Category: ${cat}) — ${p.description || "Active published policy"}`;
+              const reqDocs = policyReqDocsMap[p.id] || [];
+              const docsListStr = reqDocs.length > 0
+                ? reqDocs.map((d: any, idx: number) => `\n    ${idx + 1}. ${d.label} (type: ${d.document_type})`).join("")
+                : "\n    (Standard documentation)";
+              return `• Policy: "${p.name}" (ID: ${p.id})\n  Category: ${cat}\n  Description: ${p.description || "Active published policy"}\n  Official Required Documents Configured by Company:${docsListStr}`;
             })
-            .join("\n")
+            .join("\n\n")
         : "No policies currently published.";
 
       let geminiPayload: any;
@@ -614,30 +640,12 @@ RECOMMENDED_POLICY_IDS: []`;
 
         const pubPolicyIds = publishedPolicies.map((p) => p.id);
         let pubPolicyDocs: any[] = [];
-        let pubPolicyReqDocs: any[] = [];
         if (pubPolicyIds.length > 0) {
-          const [pDocsRes, rDocsRes] = await Promise.all([
-            adminClient
-              .from("policy_documents")
-              .select("id, policy_id, filename, file_path, document_type")
-              .in("policy_id", pubPolicyIds),
-            adminClient
-              .from("policy_required_documents")
-              .select("id, policy_id, document_type, label, display_order")
-              .in("policy_id", pubPolicyIds)
-              .order("display_order", { ascending: true }),
-          ]);
+          const pDocsRes = await adminClient
+            .from("policy_documents")
+            .select("id, policy_id, filename, file_path, document_type")
+            .in("policy_id", pubPolicyIds);
           pubPolicyDocs = pDocsRes.data || [];
-          pubPolicyReqDocs = rDocsRes.data || [];
-        }
-
-        // Map policy required documents by policy_id
-        const policyReqDocsMap: Record<string, any[]> = {};
-        for (const rd of pubPolicyReqDocs) {
-          if (!policyReqDocsMap[rd.policy_id]) {
-            policyReqDocsMap[rd.policy_id] = [];
-          }
-          policyReqDocsMap[rd.policy_id].push(rd);
         }
 
         // ── Phase 5b: Embedding-based Policy Candidate Narrowing ──
@@ -852,7 +860,7 @@ Keep responses short, clear, and readable (under 140 words). Use exactly 3 short
    • If applicant uploaded documents and SOME ARE MISSING for the recommended policy:
      Label as **Remaining Documents Needed:** and list ONLY the remaining document(s) required for that policy that haven't been provided yet! (Reference the specific "Required Documents" configured for that policy in the catalog. Never re-request documents that the applicant already successfully submitted).
    • If NO documents were uploaded yet, or all uploaded documents were unaccepted/incompatible:
-     Label as **Required Documents:** and list the genuine documents required for that policy category (e.g. for Health: Government ID / Aadhaar Card, Medical Report, Income Proof; for Motor: Vehicle RC, Driving License, Government ID).
+     Label as **Required Documents:** and list ALL the exact genuine documents configured for that candidate policy in the catalog above without omitting any of them (e.g. for Car Insurance: Vehicle Registration Certificate (RC), Valid Driving License, and Age Proof Certificate).
    • If ALL required documents for the policy are verified and applicant is eligible:
      Instruct them to proceed to apply: "All requirements satisfied. To apply, visit [Apply for <Policy Name>](/client/policies/<policy_id>)."
 
@@ -980,9 +988,23 @@ CRITICAL RULE ON POLICY AVAILABILITY:
     - NEVER claim, promise, or hallucinate that InsuranceAI offers a policy or category that is not in the live published list above!
 • For live policies (e.g. Car Insurance or Health Insurance): Confirm that we offer it and state what is needed to apply.
 
-INSURANCEAI PLATFORM GROUNDING & REQUIRED DOCUMENTS:
-• When asked about required documents or platform rules, clarify that InsuranceAI supports policy-specific document requirements (e.g. Health policies require Medical Reports, ID, and Income; Car/Motor policies require Vehicle RC and Driving License). Each policy's exact required checklist is displayed on its application page.
-• STRICT DOCUMENT COMPATIBILITY: If asked about substituting documents (e.g. using an electricity bill or marksheet instead of Aadhaar, or a photo instead of Vehicle RC), inform the applicant that documents must be genuine and strictly compatible with the requirement. If a policy requires Aadhaar Card, only a genuine UIDAI Aadhaar Card or official government photo ID is accepted. Incompatible documents will fail verification.
+COMPANY POLICY REQUIRED DOCUMENTS (GROUND TRUTH - STRICT):
+• When the applicant asks what documents are needed, required, or expected to apply for ANY policy or category (e.g. "what documents are needed for car insurance?", "what documents are needed for health insurance?"):
+  - You MUST strictly consult the "Official Required Documents Configured by Company" for that specific policy in the LIVE POLICY CATALOG above!
+  - ALWAYS list ALL configured required documents by their exact official labels without omitting any of them:
+    * For Car Insurance ("new"): You MUST list all 3 configured required documents:
+      • **Vehicle Registration Certificate (RC)**: Official government proof of vehicle registration.
+      • **Valid Driving License**: A valid driver's license for the primary applicant.
+      • **Age Proof Certificate**: Official proof of age (such as Birth Certificate, School Leaving Certificate, or Passport).
+    * For Health Insurance ("Health"): You MUST list all 4 configured required documents:
+      • **Government ID Proof**: Authentic Aadhaar Card or government photo ID.
+      • **Recent Medical Report**: Authentic diagnostic medical report.
+      • **Income Proof / Salary Slip**: Official salary slip or income proof.
+      • **Age Proof Certificate**: Official proof of age.
+  - State clearly: "Please ensure all uploaded documents are genuine and strictly compatible, as substitute files (such as basic photo IDs or utility bills) will fail verification. You can view the exact application checklist directly on the policy page."
+  - CRITICAL: NEVER omit Age Proof Certificate or any other document configured in the company catalog, and NEVER invent extra documents!
+• STRICT DOCUMENT COMPATIBILITY:
+  - If asked about substituting documents (e.g. using an electricity bill or marksheet instead of Aadhaar, or a photo instead of Vehicle RC), inform the applicant that documents must be genuine and strictly compatible with the requirement. If a policy requires Aadhaar Card / ID, only a genuine UIDAI Aadhaar Card or official government photo ID is accepted. Incompatible documents will fail verification.
 
 CONVERSATION SIDEBAR TITLE (MANDATORY):
 • At the end of your response, on its own line, append:
